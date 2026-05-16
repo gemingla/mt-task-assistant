@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/ASUS/AppData/Local/Programs/Python/Python310/lib/site-packages/matplotlib/backends/**)",
+      "Bash(python -c \"import matplotlib.backends.backend_qt5agg; print\\('OK'\\); print\\(matplotlib.backends.backend_qt5agg.__file__\\)\")",
+      "Bash(python -c \"import json; data=json.load\\(open\\('d:/mt time/mt time assistant/tasks.json','r',encoding='utf-8'\\)\\); print\\(f'tasks count: {len\\(data\\)}'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(./MT任务助手.exe --version)",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(tasklist)"
+    ]
+  }
+}

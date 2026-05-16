@@ -1,0 +1,60 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.egg-info/
+.eggs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Project specific
+*.log
+crash.log
+*.json.bak
+
+# User data files (keep templates)
+tasks.json
+stats.json
+reminders.json
+config.json
+ai_usage_stats.json
+shown_tips.json
+welcome_shown.txt
+emergency_storage/
+memory_storage/
+
+# Large model files (download separately)
+models/
+
+# PyInstaller
+*.manifest
+*.exe
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp

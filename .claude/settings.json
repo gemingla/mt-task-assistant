@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m PyInstaller --version)",
+      "Bash(\"/c/Users/ASUS/AppData/Local/Programs/Python/Python311/Scripts/pyinstaller\" mt_task_assistant.spec)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('reminder_manager.py', doraise=True\\); py_compile.compile\\('main.py', doraise=True\\); print\\('语法检查通过'\\)\")",
+      "Bash(.venv/Scripts/python.exe -m PyInstaller --version)",
+      "Bash(pip list *)",
+      "Bash(pyinstaller mt_task_assistant.spec --clean)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('weekly_report.py', doraise=True\\); print\\('语法检查通过'\\)\")"
+    ]
+  }
+}
