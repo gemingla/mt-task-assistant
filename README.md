@@ -72,13 +72,13 @@ MT Task Assistant 是一款基于人工智能的桌面任务管理应用，融�
 
 ### 方式一：直接下载（推荐）
 
-前往 [Releases](https://github.com/your-username/mt-task-assistant/releases) 页面下载最新版本的安装包。
+前往 [Releases](https://github.com/gemingla/mt-task-assistant/releases) 页面下载最新版本的安装包。
 
 ### 方式二：从源码运行
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/mt-task-assistant.git
+git clone https://github.com/gemingla/mt-task-assistant.git
 cd mt-task-assistant
 
 # 创建虚拟环境

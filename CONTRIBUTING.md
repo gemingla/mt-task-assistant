@@ -6,7 +6,7 @@
 
 ### 报告 Bug
 
-如果你发现了 bug，请在 [Issues](https://github.com/your-username/mt-task-assistant/issues) 页面创建一个新的 issue，包含：
+如果你发现了 bug，请在 [Issues](https://github.com/gemingla/mt-task-assistant/issues) 页面创建一个新的 issue，包含：
 
 - 问题描述
 - 复现步骤
@@ -43,7 +43,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/mt-task-assistant.git
+git clone https://github.com/gemingla/mt-task-assistant.git
 cd mt-task-assistant
 
 # 创建虚拟环境
