@@ -28,6 +28,21 @@
 
 MT Task Assistant 是一款基于人工智能的桌面任务管理应用，融合了自然语言处理、智能优先级排序、AI 对话助手等功能。通过直观的界面和强大的 AI 能力，帮助你高效管理日常任务、提升工作效率。
 
+## 🖼 界面预览
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="images/screenshot-light.png" alt="浅色主题界面"><br>
+      <sub>浅色主题 · 萌兔粉</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="images/screenshot-dark.png" alt="深色主题界面"><br>
+      <sub>深色主题 · 深海蓝</sub>
+    </td>
+  </tr>
+</table>
+
 ## ✨ 功能特性
 
 ### 🫧 动态玻璃界面
