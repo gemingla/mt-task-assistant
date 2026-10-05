@@ -161,8 +161,9 @@ from glass_style import (
     apply_combobox_style, apply_textedit_style, set_completed_style,
     GLOBAL_BG_COLOR, THEME_COLOR, HOVER_COLOR, CARD_BG_COLOR, TEXT_COLOR, SUBTEXT_COLOR, COMPLETED_BG_COLOR
 )
+from theme_adapter import ThemeAdapter
 from glass_effects import (
-    AuroraBackground, GlassPanel, GlassTabWidget, SlidingPill, LiquidGlassButton,
+    AuroraBackground, GlassPanel, GlassTabWidget, SlidingPill, LiquidGlassButton, play_strike_through,
     glass_palette, fade_in_window, make_scroll_areas_transparent,
 )
 
@@ -269,48 +270,19 @@ class TaskCardWidget(QFrame):
         self.time_label.mouseDoubleClickEvent = self.on_time_double_click
         layout.addWidget(self.time_label, alignment=Qt.AlignVCenter)
 
-        self.focus_btn = QPushButton("🎯")
-        self.focus_btn.setFixedSize(44, 44)
-        self.focus_btn.setCursor(Qt.PointingHandCursor)
+        self.focus_btn = LiquidGlassButton("🎯", tint="#FF6B9D", font_px=18, refract=False,
+                                           hover_tint="#EC407A")
+        self.focus_btn.setFixedSize(46, 46)
         self.focus_btn.setToolTip("开始专注")
-        self.focus_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF6B9D;
-                color: white;
-                border: none;
-                border-radius: 22px;
-                font-size: 20px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: #EC407A;
-            }
-        """)
         self.focus_btn.clicked.connect(self.on_focus_clicked)
         if self.task.completed:
             self.focus_btn.hide()
         layout.addWidget(self.focus_btn)
 
-        self.delete_btn = QPushButton("✕")
-        self.delete_btn.setFixedSize(36, 36)
-        self.delete_btn.setCursor(Qt.PointingHandCursor)
+        self.delete_btn = LiquidGlassButton("✕", tint="#FFFFFF", text_color="#A0A0A8", font_px=15,
+                                            refract=False, hover_tint="#FFCDD2", hover_text_color="#E53935")
+        self.delete_btn.setFixedSize(38, 38)
         self.delete_btn.setToolTip("删除任务")
-        self.delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #BBBBBB;
-                border: 1px solid #DDDDDD;
-                border-radius: 18px;
-                font-size: 16px;
-                font-weight: bold;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: #FFEBEE;
-                color: #EF4444;
-                border: 1px solid #FFCDD2;
-            }
-        """)
         self.delete_btn.clicked.connect(self.on_delete_clicked)
         layout.addWidget(self.delete_btn)
 
@@ -392,10 +364,35 @@ class TaskCardWidget(QFrame):
 
     def on_checkbox_changed(self, state):
         self.animate_checkbox()
-        # 完成任务时播放弹跳动画
-        if state == Qt.Checked:
+        # 完成任务时：删除线从左到右划过 + 弹跳庆祝，动画结束后再切换为完成样式
+        if state == Qt.Checked and not self.task.completed:
             self._play_complete_bounce()
-        QTimer.singleShot(100, self._do_checkbox_change)
+            self._strike_anim = play_strike_through(self.name_label, on_finished=self._do_checkbox_change)
+        else:
+            QTimer.singleShot(100, self._do_checkbox_change)
+
+    def play_enter(self):
+        """新任务入场：从左侧滑入并淡入"""
+        layout = self.layout()
+        margins = layout.contentsMargins()
+        effect = QGraphicsOpacityEffect(self)
+        effect.setOpacity(0.0)
+        self.setGraphicsEffect(effect)
+        anim = QVariantAnimation(self)
+        anim.setDuration(420)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        def step(v):
+            effect.setOpacity(v)
+            layout.setContentsMargins(int(margins.left() + 40 * (1 - v)), margins.top(),
+                                      margins.right(), margins.bottom())
+
+        anim.valueChanged.connect(step)
+        anim.finished.connect(lambda: self.setGraphicsEffect(None))
+        anim.start(QVariantAnimation.DeleteWhenStopped)
+        self._enter_anim = anim
 
     def _play_complete_bounce(self):
         """完成任务时的弹跳庆祝效果"""
@@ -1755,7 +1752,7 @@ class TagManagerDialog(QDialog):
             return
         
         html = "<table style='width: 100%; border-collapse: collapse;'>"
-        html += "<tr style='background-color: #F5F5F5;'><th style='padding: 8px; text-align: left;'>标签</th><th style='padding: 8px; text-align: center;'>任务数量</th></tr>"
+        html += "<tr style='background-color: rgba(128, 128, 128, 0.18);'><th style='padding: 8px; text-align: left;'>标签</th><th style='padding: 8px; text-align: center;'>任务数量</th></tr>"
         
         for tag, count in sorted(stats.items(), key=lambda x: x[1], reverse=True):
             color = self.tag_manager.get_tag_color(tag)
@@ -4075,6 +4072,9 @@ class MainWindow(QMainWindow):
         self.screen_height = screen_geometry.height()
         self.scale_factor = self.screen_width / 1920.0 if self.screen_width > 1920 else 1.0
 
+        # 主题适配器：让对话框和各页面中写死的浅色样式跟随玻璃主题
+        self.theme_adapter = ThemeAdapter(QApplication.instance(), self)
+
         # 初始化UI和系统托盘
         self.init_system_tray()
         self.init_ui()
@@ -4472,6 +4472,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'left_title'):
             self.left_title.setStyleSheet(f"color: {panel_text};")
         self._apply_glass_theme(theme, glass, panel_text, muted_text, glass_fill, glass_fill_hover, glass_border)
+        if hasattr(self, 'theme_adapter'):
+            self.theme_adapter.set_theme(theme)
 
         try:
             import glass_style
@@ -4940,6 +4942,17 @@ class MainWindow(QMainWindow):
         self.task_list_widget.setItemWidget(item, card_widget)
         return item
 
+    def _play_task_enter(self, task_id):
+        """找到新任务的卡片，滚动到可见位置并播放入场动画"""
+        for i in range(self.task_list_widget.count()):
+            item = self.task_list_widget.item(i)
+            if item.data(Qt.UserRole) == task_id:
+                self.task_list_widget.scrollToItem(item)
+                card = self.task_list_widget.itemWidget(item)
+                if card is not None:
+                    card.play_enter()
+                return
+
     def set_task_filter(self, filter_type):
         self.current_filter = filter_type
         active = self.filter_all_btn if filter_type == "all" else self.filter_today_btn
@@ -5344,6 +5357,8 @@ class MainWindow(QMainWindow):
                     self._analyze_urgent_task(task, due_date)
 
                 self.refresh_tasks()
+                if task:
+                    self._play_task_enter(task.id)
                 self.update_tag_filter()  # 更新标签筛选
                 if hasattr(self, 'stats_tab'):
                     self.stats_tab.refresh_stats()

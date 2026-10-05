@@ -19,7 +19,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import (
     QColor, QPainter, QImage, QPixmap, QRadialGradient, QLinearGradient,
-    QPainterPath, QPen, QBrush, QCursor,
+    QPainterPath, QPen, QBrush, QCursor, QFontMetrics,
 )
 from PyQt5.QtWidgets import QWidget, QFrame, QTabBar, QTabWidget, QPushButton
 
@@ -397,8 +397,15 @@ class LiquidGlassButton(QPushButton):
     MARGIN = 3  # 为挤压形变和阴影预留的边距
 
     def __init__(self, text="", parent=None, tint="#FF8FAB", text_color="#FFFFFF",
-                 font_px=14, radius=None):
+                 font_px=14, radius=None, refract=True, hover_tint=None, hover_text_color=None):
+        """
+        refract: 是否折射身后的动态背景；放在不透明卡片上时应关闭
+        hover_tint / hover_text_color: 悬停时渐变到的玻璃色与文字色（如删除按钮悬停变红）
+        """
         super().__init__(text, parent)
+        self._refract = refract
+        self._hover_tint = QColor(hover_tint) if hover_tint else None
+        self._hover_text_color = QColor(hover_text_color) if hover_text_color else None
         self.setAttribute(Qt.WA_Hover, True)
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
@@ -555,10 +562,15 @@ class LiquidGlassButton(QPushButton):
         p.fillPath(shadow, QColor(0, 0, 0, int(30 + 12 * self._hover)))
 
         # 2. 折射身后的背景
-        refracted = self._draw_lens(p, body, path, radius)
+        refracted = self._refract and self._draw_lens(p, body, path, radius)
 
         # 3. 着色玻璃体
         tint = QColor(self._tint) if enabled else QColor(170, 170, 180)
+        if enabled and self._hover_tint is not None:
+            tint = mix(tint, self._hover_tint, self._hover)
+        text_color = self._text_color
+        if self._hover_text_color is not None:
+            text_color = mix(text_color, self._hover_text_color, self._hover)
         base_alpha = 190 if refracted else 235
         tg = QLinearGradient(body.topLeft(), body.bottomLeft())
         tg.setColorAt(0, with_alpha(tint.lighter(108), min(255, base_alpha - 30 + 30 * self._hover)))
@@ -622,12 +634,60 @@ class LiquidGlassButton(QPushButton):
         # 9. 文字（带轻微投影增强可读性）
         p.setFont(self.font())
         text_rect = body.adjusted(6, 0, -6, 0)
-        if self._text_color.lightness() > 160:
+        if text_color.lightness() > 160:
             p.setPen(with_alpha(tint.darker(170), 150))
             p.drawText(text_rect.translated(0, 1.2), Qt.AlignCenter, self.text())
-        p.setPen(self._text_color)
+        p.setPen(text_color)
         p.drawText(text_rect, Qt.AlignCenter, self.text())
         p.end()
+
+
+# ==================== 删除线划过动画 ====================
+
+class _StrikeOverlay(QWidget):
+    def __init__(self, label, color):
+        super().__init__(label)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setGeometry(label.rect())
+        self._color = QColor(color)
+        self._progress = 0.0
+        metrics = QFontMetrics(label.font())
+        self._text_width = min(label.contentsRect().width(), metrics.horizontalAdvance(label.text()))
+        self.show()
+
+    def set_progress(self, v):
+        self._progress = float(v)
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        y = self.height() / 2 + 1
+        pen = QPen(self._color, 2.2)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.drawLine(QPointF(0, y), QPointF(self._text_width * self._progress, y))
+        p.end()
+
+
+def play_strike_through(label, color="#22C55E", duration=320, on_finished=None):
+    """在文字上画一条从左到右划过的删除线（完成任务时使用）"""
+    overlay = _StrikeOverlay(label, color)
+    anim = QVariantAnimation(overlay)
+    anim.setDuration(duration)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.setEasingCurve(QEasingCurve.InOutCubic)
+    anim.valueChanged.connect(overlay.set_progress)
+
+    def finish():
+        if on_finished:
+            on_finished()
+        overlay.deleteLater()
+
+    anim.finished.connect(finish)
+    anim.start()
+    return anim
 
 
 # ==================== 滑动高亮块 ====================
