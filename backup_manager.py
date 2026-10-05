@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 import shutil
 from utils import get_data_path, atomic_write_json
 
-BACKUP_VERSION = "2.0"
+from version import __version__ as BACKUP_VERSION
 AUTO_BACKUP_PREFIX = "backup_auto_"
 AUTO_BACKUP_KEEP = 7
 
@@ -109,8 +109,8 @@ class BackupManager:
         }
 
     def _backup_config(self) -> dict:
-        """备份配置"""
-        return self.config_manager.load_config()
+        """备份配置（API Key 保持加密形式，备份文件中不出现明文）"""
+        return self.config_manager.load_stored_config()
 
     def _backup_memories(self) -> dict:
         """备份记忆数据"""

@@ -45,30 +45,28 @@ class SmartPriorityEngine:
 
         return min(max(score, 0), 100)
 
+    # 紧迫度满分与半衰期：剩余时间每多 48 小时，紧迫度减半
+    URGENCY_MAX = 40
+    URGENCY_HALF_LIFE_HOURS = 48
+    URGENCY_NO_DUE = 5          # 没有截止时间
+    URGENCY_DATED_FLOOR = 6     # 有截止时间的任务至少略高于没有截止时间的
+
     def _calculate_urgency_score(self, task) -> float:
-        """计算时间紧迫度分数"""
+        """计算时间紧迫度分数 (0-40)，随剩余时间单调递减；已过期为满分"""
         due_date = getattr(task, 'due_date', None)
         if not due_date:
-            return 5
+            return self.URGENCY_NO_DUE
 
         try:
             due = datetime.strptime(due_date[:16], "%Y-%m-%d %H:%M") if isinstance(due_date, str) else due_date
-            time_diff = (due - self.now).total_seconds()
-
-            if time_diff < 0:
-                return 120  # 已过期
-            elif time_diff < 86400:
-                return 100  # 24小时内
-            elif time_diff < 172800:
-                return 80   # 48小时内
-            elif time_diff < 604800:
-                return 60 * (1 - time_diff / 604800)  # 7天内递减
-            elif time_diff < 1209600:
-                return 48   # 14天内
-            else:
-                return max(5, 20 - time_diff / 86400 * 0.5)
         except (ValueError, TypeError):
-            return 5
+            return self.URGENCY_NO_DUE
+
+        hours_left = (due - self.now).total_seconds() / 3600
+        if hours_left <= 0:
+            return self.URGENCY_MAX
+        score = self.URGENCY_MAX * 0.5 ** (hours_left / self.URGENCY_HALF_LIFE_HOURS)
+        return max(score, self.URGENCY_DATED_FLOOR)
 
     def _calculate_tag_score(self, task) -> float:
         """计算标签重要性分数"""

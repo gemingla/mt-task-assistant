@@ -84,14 +84,15 @@ from task_manager import TaskManager
 from stats_manager import StatsManager
 from reminder_manager import ReminderManager, Reminder
 from tag_manager import TagManager
-from ai_client import AIClient, call_ai, call_ai_stream, get_models, render_latex
+from ai_client import get_models, render_latex
 # 优化版 AI 客户端
-from ai_client_optimized import call_ai_optimized, call_ai_stream_optimized, get_optimized_client
+from ai_client_optimized import call_ai_stream_optimized
 from pomodoro_widget import PomodoroWidget
 from pomodoro_dialog import PomodoroDialog
 from stats_chart_widget import BarChartWidget, PieChartWidget
 from stats_widget import StatisticsWidget
 from utils import get_data_path, log_error, parse_datetime
+from version import __version__
 from memory_manager import MemoryManager
 try:
     from voice_input import get_voice_input, get_default_model_path
@@ -116,29 +117,20 @@ from achievement_manager import AchievementManager, AchievementDialog, show_achi
 COMPLETED_VISIBLE_DAYS = 3
 
 
-class AsyncAPICall(QThread):
-    result_ready = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
+class BackgroundTask(QThread):
+    """在后台线程执行任意函数，避免网络请求卡住界面；结果通过信号回到 UI 线程"""
+    succeeded = pyqtSignal(object)
+    failed = pyqtSignal(str)
 
-    def __init__(self, messages, parent=None, use_optimized=True):
+    def __init__(self, func, *args, parent=None, **kwargs):
         super().__init__(parent)
-        self.messages = messages
-        self.use_optimized = use_optimized
+        self._func, self._args, self._kwargs = func, args, kwargs
 
     def run(self):
         try:
-            # 使用优化版 API 调用
-            if self.use_optimized:
-                result = call_ai_optimized(self.messages)
-            else:
-                result = call_ai(self.messages)
-            
-            if result:
-                self.result_ready.emit(result)
-            else:
-                self.error_occurred.emit("API 返回为空")
+            self.succeeded.emit(self._func(*self._args, **self._kwargs))
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            self.failed.emit(str(e))
 
 
 class AsyncAPICallStream(QThread):
@@ -146,28 +138,18 @@ class AsyncAPICallStream(QThread):
     error_occurred = pyqtSignal(str)
     stream_finished = pyqtSignal(str)
 
-    def __init__(self, messages, parent=None, use_optimized=True):
+    def __init__(self, messages, parent=None):
         super().__init__(parent)
         self.messages = messages
-        self.use_optimized = use_optimized
 
     def run(self):
         try:
-            # 使用优化版流式 API 调用
-            if self.use_optimized:
-                call_ai_stream_optimized(
-                    self.messages,
-                    on_chunk=lambda chunk, acc: self.chunk_ready.emit(chunk, acc),
-                    on_error=lambda e: self.error_occurred.emit(e),
-                    on_complete=lambda r: self.stream_finished.emit(r)
-                )
-            else:
-                call_ai_stream(
-                    self.messages,
-                    on_chunk=lambda chunk, acc: self.chunk_ready.emit(chunk, acc),
-                    on_error=lambda e: self.error_occurred.emit(e),
-                    on_complete=lambda r: self.stream_finished.emit(r)
-                )
+            call_ai_stream_optimized(
+                self.messages,
+                on_chunk=lambda chunk, acc: self.chunk_ready.emit(chunk, acc),
+                on_error=lambda e: self.error_occurred.emit(e),
+                on_complete=lambda r: self.stream_finished.emit(r)
+            )
         except Exception as e:
             self.error_occurred.emit(str(e))
 
@@ -176,7 +158,7 @@ from glass_style import (
     apply_glass_style, apply_glass_style_secondary, apply_glass_style_danger,
     apply_glass_style_light, apply_glass_style_icon, apply_input_style, apply_checkbox_style,
     apply_card_style, apply_scrollbar_style, apply_tab_style, apply_spinbox_style,
-    apply_combobox_style, apply_textedit_style, set_completed_style, FadeAnimation,
+    apply_combobox_style, apply_textedit_style, set_completed_style,
     GLOBAL_BG_COLOR, THEME_COLOR, HOVER_COLOR, CARD_BG_COLOR, TEXT_COLOR, SUBTEXT_COLOR, COMPLETED_BG_COLOR
 )
 from glass_effects import (
@@ -184,34 +166,6 @@ from glass_effects import (
     glass_palette, fade_in_window, make_scroll_areas_transparent,
 )
 
-try:
-    import speech_recognition as sr
-    HAS_SPEECH = True
-except ImportError:
-    HAS_SPEECH = False
-
-TASK_CARD_STYLE = """
-QFrame#task-card {
-    background-color: white;
-    border-radius: 12px;
-    border: 1px solid #E8E8E8;
-}
-QFrame#task-card:hover {
-    border: 1px solid #FFB3CC;
-    background-color: #FFFAFB;
-}
-"""
-
-TASK_CARD_COMPLETED_STYLE = """
-QFrame#task-card {
-    background-color: #F8F8F8;
-    border-radius: 12px;
-    border: 1px solid #E0E0E0;
-}
-QFrame#task-card:hover {
-    border: 1px solid #C8E6C9;
-}
-"""
 
 class TaskCardWidget(QFrame):
     deleteRequested = pyqtSignal(object)
@@ -759,321 +713,6 @@ class TaskCardWidget(QFrame):
         return None
 
 
-class TaskCard(QFrame):
-    """已弃用 - 保留仅为兼容性，请使用 TaskCardWidget"""
-    opacityChanged = pyqtSignal(float)
-
-    def __init__(self, task, task_manager, stats_manager, refresh_callback, focus_callback=None, parent=None):
-        super().__init__(parent)
-        # 转发到新的 TaskCardWidget
-        self._delegate = TaskCardWidget(task, task_manager, stats_manager, parent)
-
-    def update_completed_style(self):
-        if self.task.completed:
-            self.setStyleSheet("""
-                QFrame#taskCard {
-                    background-color: #E8F5E9;
-                    border: 2px solid #4CAF50;
-                    border-radius: 10px;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QFrame#taskCard {
-                    background-color: #FFFFFF;
-                    border: 1px solid #E0E0E0;
-                    border-radius: 10px;
-                }
-                QFrame#taskCard:hover {
-                    border: 1px solid #FFB6C1;
-                }
-            """)
-
-    def get_opacity(self):
-        return self._opacity
-
-    def set_opacity(self, value):
-        self._opacity = value
-        if self.opacity_effect:
-            self.opacity_effect.setOpacity(value)
-        self.opacityChanged.emit(value)
-
-    opacity = pyqtProperty(float, get_opacity, set_opacity, notify=opacityChanged)
-
-    @property
-    def animations(self):
-        if self._animation_manager is None:
-            self._animation_manager = AnimationManager(self)
-        return self._animation_manager
-
-    def start_fade_in(self):
-        self.opacity_effect.setOpacity(0.0)
-        self._opacity = 0.0
-        self.fade_anim = QVariantAnimation(self)
-        self.fade_anim.setDuration(400)
-        self.fade_anim.setStartValue(0.0)
-        self.fade_anim.setEndValue(1.0)
-        self.fade_anim.setEasingCurve(QEasingCurve.OutCubic)
-        self.fade_anim.valueChanged.connect(lambda v: self.opacity_effect.setOpacity(v))
-        self.fade_anim.start()
-
-    def start_fade_out(self, callback):
-        self.fade_anim = QVariantAnimation(self)
-        self.fade_anim.setDuration(300)
-        self.fade_anim.setStartValue(1.0)
-        self.fade_anim.setEndValue(0.0)
-        self.fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
-        self.fade_anim.valueChanged.connect(lambda v: self.opacity_effect.setOpacity(v))
-        self.fade_anim.finished.connect(callback)
-        self.fade_anim.start()
-
-    def animate_completion(self, completed):
-        self.update_completed_style()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.drag_start_pos = event.pos()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self.drag_start_pos:
-            diff = event.pos() - self.drag_start_pos
-            if diff.manhattanLength() > 10:
-                drag = QDrag(self)
-                mime_data = QMimeData()
-                mime_data.setText(str(id(self)))
-                drag.setMimeData(mime_data)
-                drag.setPixmap(self.grab())
-                drag.setHotSpot(self.rect().center())
-                self.setOpacity(0.5)
-                drag.exec_(Qt.MoveAction)
-                self.setOpacity(1.0)
-        super().mouseMoveEvent(event)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-            self.setStyleSheet("""
-                QFrame {
-                    background-color: #FFF8E1;
-                    border: 2px dashed #FFC107;
-                    border-radius: 10px;
-                }
-            """)
-
-    def dragLeaveEvent(self, event):
-        self.update_completed_style()
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        self.update_completed_style()
-        event.acceptProposedAction()
-
-        source_card = None
-        parent_widget = self.parent()
-        if parent_widget and isinstance(parent_widget, QWidget):
-            task_layout = parent_widget.layout()
-            if task_layout:
-                for i in range(task_layout.count()):
-                    widget = task_layout.itemAt(i).widget()
-                    if widget and isinstance(widget, TaskCard) and widget != self:
-                        card_rect = widget.rect().translated(widget.pos())
-                        if card_rect.contains(self.mapTo(widget, event.pos())):
-                            source_card = widget
-                            break
-
-        if source_card:
-            parent_widget = self.parent()
-            if parent_widget and isinstance(parent_widget, QWidget):
-                task_layout = parent_widget.layout()
-                if task_layout:
-                    from_idx = task_layout.indexOf(source_card)
-                    to_idx = task_layout.indexOf(self)
-                    if from_idx != -1 and to_idx != -1 and from_idx != to_idx:
-                        QTimer.singleShot(100, self.refresh_callback)
-
-    def setOpacity(self, opacity):
-        if self.opacity_effect:
-            self.opacity_effect.setOpacity(opacity)
-
-    def format_time(self, minutes):
-        if minutes >= 60:
-            hours = minutes // 60
-            mins = minutes % 60
-            if mins == 0:
-                return f"{hours}小时"
-            return f"{hours}小时{mins}分钟"
-        return f"{minutes}分钟"
-
-    def init_ui(self):
-        self.setObjectName("taskCard")
-        self.setMinimumHeight(70)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 12, 15, 12)
-        layout.setSpacing(12)
-
-        self.checkbox = QCheckBox()
-        self.checkbox.setChecked(self.task.completed)
-        self.checkbox.setFixedSize(28, 28)
-        apply_checkbox_style(self.checkbox)
-        self.checkbox.stateChanged.connect(self.on_checkbox_changed)
-        layout.addWidget(self.checkbox, 0, Qt.AlignVCenter)
-
-        self.name_label = QLabel(self.task.name)
-        self.name_label.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
-        self.name_label.setStyleSheet("color: #999; text-decoration: line-through;" if self.task.completed else "color: #333;")
-        self.name_label.setCursor(Qt.PointingHandCursor)
-        self.name_label.setWordWrap(True)  # 允许文本换行
-        self.name_label.setToolTip(self.task.name)  # 鼠标悬停显示完整文本
-        self.name_label.mouseDoubleClickEvent = self.on_name_double_click
-        layout.addWidget(self.name_label, stretch=1)
-
-        time_text = self.format_time(self.task.estimated_minutes)
-        self.time_label = QLabel(f"⏱ {time_text}")
-        self.time_label.setObjectName("timeLabel")
-        self.time_label.setStyleSheet("color: #666; font-size: 12px;")
-        layout.addWidget(self.time_label)
-
-        self.focus_btn = QPushButton("🎯")
-        self.focus_btn.setFixedSize(38, 38)
-        self.focus_btn.setCursor(Qt.PointingHandCursor)
-        self.focus_btn.setToolTip("开始专注")
-        self.focus_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255, 182, 193, 0.7);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.8);
-                border-radius: 19px;
-                font-size: 18px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: rgba(229, 57, 89, 0.8);
-            }
-        """)
-        self.focus_btn.clicked.connect(self.on_focus_clicked)
-        if self.task.completed:
-            self.focus_btn.hide()
-        layout.addWidget(self.focus_btn)
-
-        self.delete_btn = QPushButton("✕")
-        self.delete_btn.setFixedSize(30, 30)
-        self.delete_btn.setCursor(Qt.PointingHandCursor)
-        self.delete_btn.setToolTip("删除任务")
-        self.delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: rgba(255, 107, 138, 0.6);
-                border: 1px solid rgba(255, 107, 138, 0.3);
-                border-radius: 15px;
-                font-size: 14px;
-                font-weight: bold;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 235, 238, 0.9);
-                color: rgba(229, 57, 53, 0.95);
-                border: 1px solid rgba(255, 107, 138, 0.7);
-            }
-        """)
-        self.delete_btn.clicked.connect(self.delete_card)
-        layout.addWidget(self.delete_btn)
-
-        self.bg_animation = QVariantAnimation(self)
-        self.bg_animation.setDuration(400)
-        self.bg_animation.setEasingCurve(QEasingCurve.InOutCubic)
-        self.bg_animation.valueChanged.connect(self.on_bg_color_changed)
-
-    def on_checkbox_changed(self, state):
-        task = self.task_manager.toggle_complete(self.task.id)
-        if task:
-            self.task = task
-            if task.completed:
-                self.stats_manager.add_task_completed()
-                self.animate_bg_color(QColor(255, 255, 255), QColor(232, 245, 233))
-                self.name_label.setStyleSheet("color: #999; text-decoration: line-through;")
-                self.focus_btn.hide()
-            else:
-                self.animate_bg_color(QColor(232, 245, 233), QColor(255, 255, 255))
-                self.name_label.setStyleSheet("color: #333;")
-                self.focus_btn.show()
-
-            if self.refresh_callback:
-                main_window = self.get_main_window()
-                if main_window and hasattr(main_window, 'stats_tab'):
-                    main_window.stats_tab.refresh_stats()
-
-    def get_main_window(self):
-        widget = self.parent()
-        while widget:
-            if isinstance(widget, MainWindow):
-                return widget
-            widget = widget.parent()
-        return None
-
-    def animate_bg_color(self, from_color, to_color):
-        self.bg_animation.stop()
-        self.bg_animation.setStartValue(from_color)
-        self.bg_animation.setEndValue(to_color)
-        self.bg_animation.start()
-
-    def on_bg_color_changed(self, color):
-        r, g, b, a = color.getRgb()
-        is_completed = g > 240
-        border_color = "#4CAF50" if is_completed else "#E0E0E0"
-        border_width = "2px" if is_completed else "1px"
-        self.setStyleSheet(f"""
-            QFrame#taskCard {{
-                background-color: rgb({r}, {g}, {b});
-                border: {border_width} solid {border_color};
-                border-radius: 10px;
-            }}
-        """)
-
-    def on_name_double_click(self, event):
-        self.name_edit = QLineEdit(self.task.name)
-        self.name_edit.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
-        self.name_edit.setStyleSheet("""
-            QLineEdit {
-                background-color: white;
-                border: 2px solid #FF8FAB;
-                border-radius: 5px;
-                padding: 2px 5px;
-            }
-        """)
-        self.name_edit.selectAll()
-        self.name_edit.returnPressed.connect(self.save_name_edit)
-        self.name_edit.focusOutEvent = lambda e: self.save_name_edit()
-
-        layout = self.layout()
-        layout.replaceWidget(self.name_label, self.name_edit)
-        self.name_label.hide()
-        self.name_edit.setFocus()
-
-    def save_name_edit(self):
-        new_name = self.name_edit.text().strip()
-        if new_name:
-            self.task_manager.update_task(self.task.id, name=new_name)
-            self.task.name = new_name
-        self.name_label.setText(self.task.name)
-        layout = self.layout()
-        layout.replaceWidget(self.name_edit, self.name_label)
-        self.name_edit.deleteLater()
-        self.name_label.show()
-
-    def on_focus_clicked(self):
-        if self.focus_callback:
-            self.focus_callback(self.task)
-
-    def delete_card(self):
-        self.task_manager.delete_task(self.task.id)
-        self.start_fade_out(self.refresh_callback)
-
-
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1229,16 +868,24 @@ class SettingsDialog(QDialog):
 
         self.fetch_models_btn.setText("获取中...")
         self.fetch_models_btn.setEnabled(False)
-        QApplication.processEvents()
 
-        def on_error(msg):
-            QMessageBox.warning(self, "错误", msg)
+        def fetch():
+            # 后台线程里不能弹窗，先把错误信息收集起来
+            errors = []
+            models = get_models(api_url, api_key, callback=errors.append)
+            return models, errors
 
-        models = get_models(api_url, api_key, callback=on_error)
+        self._fetch_worker = BackgroundTask(fetch, parent=self)
+        self._fetch_worker.succeeded.connect(self._on_models_fetched)
+        self._fetch_worker.failed.connect(lambda msg: self._on_models_fetched((None, [msg])))
+        self._fetch_worker.start()
 
+    def _on_models_fetched(self, result):
+        models, errors = result
         self.fetch_models_btn.setText("获取")
         self.fetch_models_btn.setEnabled(True)
-
+        if errors:
+            QMessageBox.warning(self, "错误", "\n".join(errors))
         if models:
             self.model_combo.clear()
             self.model_combo.addItems(models)
@@ -1592,29 +1239,30 @@ class InputKeyPage(QWizardPage):
         self.test_btn.setEnabled(False)
         self.status_label.setText("⏳ 正在测试连接...")
         self.status_label.setStyleSheet("background-color: #FFF3E0; color: #E65100; padding: 10px; border-radius: 5px;")
-        QApplication.processEvents()
 
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
+        def request_status():
             import requests
             response = requests.get(
                 f"{self.api_url}/models",
-                headers=headers,
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
                 timeout=10
             )
-            if response.status_code == 200:
-                self.status_label.setText("✅ 连接成功！API Key 有效")
-                self.status_label.setStyleSheet("background-color: #E8F5E9; color: #2E7D32; padding: 10px; border-radius: 5px;")
-            else:
-                self.status_label.setText(f"❌ 连接失败：HTTP {response.status_code}")
-                self.status_label.setStyleSheet("background-color: #FFE0E0; color: #C00; padding: 10px; border-radius: 5px;")
-        except Exception as e:
-            self.status_label.setText(f"❌ 连接失败：{str(e)}")
-            self.status_label.setStyleSheet("background-color: #FFE0E0; color: #C00; padding: 10px; border-radius: 5px;")
+            return response.status_code
 
+        self._test_worker = BackgroundTask(request_status, parent=self)
+        self._test_worker.succeeded.connect(self._on_test_finished)
+        self._test_worker.failed.connect(lambda msg: self._on_test_finished(msg))
+        self._test_worker.start()
+
+    def _on_test_finished(self, result):
+        """result 为 HTTP 状态码，或请求异常时的错误信息"""
+        if result == 200:
+            self.status_label.setText("✅ 连接成功！API Key 有效")
+            self.status_label.setStyleSheet("background-color: #E8F5E9; color: #2E7D32; padding: 10px; border-radius: 5px;")
+        else:
+            detail = f"HTTP {result}" if isinstance(result, int) else result
+            self.status_label.setText(f"❌ 连接失败：{detail}")
+            self.status_label.setStyleSheet("background-color: #FFE0E0; color: #C00; padding: 10px; border-radius: 5px;")
         self.test_btn.setText("🧪 测试连接")
         self.test_btn.setEnabled(True)
 
@@ -3021,7 +2669,7 @@ class AboutDialog(QDialog):
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #333;")
         layout.addWidget(title_label)
 
-        version_label = QLabel("版本 1.0")
+        version_label = QLabel(f"版本 {__version__}")
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("font-size: 12px; color: #999;")
         layout.addWidget(version_label)

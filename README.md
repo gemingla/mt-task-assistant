@@ -68,7 +68,10 @@ MT Task Assistant 是一款基于人工智能的桌面任务管理应用，融�
 - 积分累计、趣味成就
 
 ### 💾 数据管理
-- 自动备份、数据恢复
+- 每日自动备份（保留最近 7 份），支持手动备份/恢复，恢复前自动保存当前数据
+- 原子写入：程序崩溃或断电也不会写出损坏的数据文件，损坏时自动从 `.bak` 恢复
+- 已完成任务永久保留用于统计/日历/周报，主列表默认只显示 3 天内完成的任务
+- API Key 使用 Windows DPAPI 加密存储，配置文件和备份中不出现明文
 - 本地存储、隐私安全
 
 ### 🎨 个性化
@@ -106,8 +109,10 @@ python main.py
 |------|------|------|
 | PyQt5 | GUI 框架 | ✅ |
 | requests | HTTP 请求 | ✅ |
+| matplotlib | 统计图表 | ✅ |
 | winotify | Windows 通知 | 可选 |
-| vosk | 语音输入 | 可选 |
+| vosk + pyaudio | 语音输入（需另行下载 vosk 中文模型到 `models/`） | 可选 |
+| pywin32 | 打包版创建桌面快捷方式 | 可选 |
 
 ## 📖 使用指南
 
@@ -156,21 +161,34 @@ mt-task-assistant/
 ├── calendar_widget.py      # 日历组件
 ├── pomodoro_widget.py      # 番茄钟组件
 ├── nlp_task_parser.py      # 自然语言解析
-├── backup_manager.py       # 数据备份
+├── backup_manager.py       # 数据备份（含每日自动备份）
 ├── config.py               # 配置管理
-├── utils.py                # 工具函数
+├── secure_store.py         # API Key 加密（Windows DPAPI）
+├── glass_effects.py        # 动态玻璃背景、玻璃面板、液态玻璃按钮
+├── utils.py                # 工具函数（含原子写入）
+├── version.py              # 版本号
+├── tests/                  # pytest 测试
 └── requirements.txt        # 依赖列表
 ```
+
+### 运行测试
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
+
+测试使用临时目录，不会读写你的真实数据文件。
 
 ### 打包发布
 
 ```bash
-# 安装 PyInstaller
-pip install pyinstaller
-
-# 打包
-pyinstaller mt_task_assistant.spec
+pip install -r requirements-dev.txt
+pyinstaller mt_task_assistant.spec --noconfirm
+# 或直接运行 build_installer.bat
 ```
+
+版本号位于 `version.py`，打包版本信息位于 `file_version_info.txt`，发布前请同步修改。
 
 ## 🤝 贡献
 

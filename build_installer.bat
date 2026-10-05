@@ -15,7 +15,7 @@ if errorlevel 1 (
 
 REM 安装依赖
 echo [1/3] 安装依赖...
-pip install -i https://pypi.tuna.tsinghua.edu.cn/simple pyinstaller -q
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt -q
 pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt -q
 
 REM 清理旧文件

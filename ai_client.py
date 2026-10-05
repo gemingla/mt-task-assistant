@@ -176,6 +176,14 @@ def render_latex(text):
     return result
 
 
+def _load_config() -> dict:
+    """读取配置（API Key 由 ConfigManager 解密）"""
+    if not os.path.exists(get_config_path()):
+        raise FileNotFoundError(get_config_path())
+    from config import ConfigManager
+    return ConfigManager(get_config_path()).load_config()
+
+
 def get_models(api_url: str, api_key: str, callback=None) -> list:
     """
     获取可用模型列表
@@ -252,8 +260,7 @@ def call_ai(messages: list, callback=None) -> str:
         str: AI 响应的 content 字符串，失败时返回 None
     """
     try:
-        with open(get_config_path(), "r", encoding="utf-8") as f:
-            config = json.load(f)
+        config = _load_config()
     except FileNotFoundError:
         if callback:
             callback("配置文件不存在，请先在设置中配置 API")
@@ -364,8 +371,7 @@ def call_ai_stream(messages: list, on_chunk=None, on_error=None, on_complete=Non
         StreamAIResponse: 流式响应对象
     """
     try:
-        with open(get_config_path(), "r", encoding="utf-8") as f:
-            config = json.load(f)
+        config = _load_config()
     except FileNotFoundError:
         if on_error:
             on_error("配置文件不存在，请先在设置中配置 API")

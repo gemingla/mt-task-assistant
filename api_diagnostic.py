@@ -24,9 +24,12 @@ def get_config_path():
 
 def load_config():
     """加载配置文件"""
+    if not os.path.exists(get_config_path()):
+        print("❌ 配置文件不存在")
+        return None
     try:
-        with open(get_config_path(), "r", encoding="utf-8") as f:
-            return json.load(f)
+        from config import ConfigManager
+        return ConfigManager(get_config_path()).load_config()
     except FileNotFoundError:
         print("❌ 配置文件不存在")
         return None

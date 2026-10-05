@@ -1,0 +1,29 @@
+# PyInstaller 版本资源（显示在 exe 的“属性 → 详细信息”中）
+# 修改版本时请同步 version.py
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(2, 0, 0, 0),
+    prodvers=(2, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        u'080404b0',
+        [StringStruct(u'CompanyName', u'MT Task Assistant'),
+         StringStruct(u'FileDescription', u'MT任务助手 - AI 驱动的任务管理'),
+         StringStruct(u'FileVersion', u'2.0.0'),
+         StringStruct(u'InternalName', u'MT任务助手'),
+         StringStruct(u'LegalCopyright', u'MIT License'),
+         StringStruct(u'OriginalFilename', u'MT任务助手.exe'),
+         StringStruct(u'ProductName', u'MT任务助手'),
+         StringStruct(u'ProductVersion', u'2.0.0')])
+    ]),
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
+  ]
+)

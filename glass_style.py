@@ -486,56 +486,6 @@ def apply_combobox_style(combo,
     """)
 
 
-# ========================
-# 动画系统
-# ========================
-
-class FadeAnimation:
-    """高级淡入淡出动画"""
-    def __init__(self, widget, duration: int = 300):
-        self.widget = widget
-        self.duration = duration
-        self.opacity_effect = None
-        self.animation = None
-
-    def fade_in(self, on_finished=None):
-        """淡入动画 — OutCubic 缓出"""
-        from PyQt5.QtWidgets import QGraphicsOpacityEffect
-        self.opacity_effect = QGraphicsOpacityEffect(self.widget)
-        self.widget.setGraphicsEffect(self.opacity_effect)
-        self.opacity_effect.setOpacity(0)
-
-        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.animation.setDuration(self.duration)
-        self.animation.setStartValue(0)
-        self.animation.setEndValue(1)
-        self.animation.setEasingCurve(QEasingCurve.OutCubic)
-
-        if on_finished:
-            self.animation.finished.connect(on_finished)
-
-        self.animation.start()
-        return self.animation
-
-    def fade_out(self, on_finished=None):
-        """淡出动画 — InCubic 缓入"""
-        if not self.opacity_effect:
-            self.opacity_effect = QGraphicsOpacityEffect(self.widget)
-            self.widget.setGraphicsEffect(self.opacity_effect)
-
-        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.animation.setDuration(self.duration)
-        self.animation.setStartValue(1)
-        self.animation.setEndValue(0)
-        self.animation.setEasingCurve(QEasingCurve.InCubic)
-
-        if on_finished:
-            self.animation.finished.connect(on_finished)
-
-        self.animation.start()
-        return self.animation
-
-
 def set_completed_style(widget: QWidget, completed: bool):
     """设置任务卡片的完成状态样式 — 绿色高亮"""
     if completed:

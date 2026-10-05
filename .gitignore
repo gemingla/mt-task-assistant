@@ -13,6 +13,7 @@ env/
 build/
 dist/
 *.spec
+!mt_task_assistant.spec
 *.egg-info/
 .eggs/
 

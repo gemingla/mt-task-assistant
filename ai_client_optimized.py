@@ -39,10 +39,10 @@ class ConfigCache:
                 if self._config and current_mtime == self._last_modified:
                     return self._config
                 
-                # 重新读取配置
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    self._config = json.load(f)
-                    self._last_modified = current_mtime
+                # 重新读取配置（API Key 由 ConfigManager 解密）
+                from config import ConfigManager
+                self._config = ConfigManager(self.config_path).load_config()
+                self._last_modified = os.path.getmtime(self.config_path)
                 
                 return self._config
             except Exception as e:
