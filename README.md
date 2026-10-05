@@ -151,7 +151,12 @@ python main.py
 
 ```
 mt-task-assistant/
-├── main.py                 # 主程序入口
+├── main.py                 # 主窗口（MainWindow）与程序入口
+├── ui_common.py            # 界面模块共享的导入、主题预设与工具
+├── widgets/                # 任务卡片等可复用组件
+├── dialogs/                # 设置、API 向导、标签、主题、提醒等对话框
+├── tabs/                   # 提醒、番茄钟、统计标签页
+├── theme_adapter.py        # 对话框自动玻璃化与深色主题样式适配
 ├── glass_style.py          # UI 样式系统
 ├── ai_client.py            # AI 客户端
 ├── task_manager.py         # 任务管理
