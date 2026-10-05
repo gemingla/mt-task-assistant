@@ -176,7 +176,7 @@ from glass_style import (
     GLOBAL_BG_COLOR, THEME_COLOR, HOVER_COLOR, CARD_BG_COLOR, TEXT_COLOR, SUBTEXT_COLOR, COMPLETED_BG_COLOR
 )
 from glass_effects import (
-    AuroraBackground, GlassPanel, GlassTabWidget, SlidingPill,
+    AuroraBackground, GlassPanel, GlassTabWidget, SlidingPill, LiquidGlassButton,
     glass_palette, fade_in_window, make_scroll_areas_transparent,
 )
 
@@ -4921,21 +4921,11 @@ class MainWindow(QMainWindow):
             QLineEdit:hover {{ background-color: {glass_fill_hover}; }}
             QLineEdit:focus {{ border-color: {btn}; background-color: {glass_fill_hover}; }}
         """)
-        self._voice_btn_qss = f"""
-            QPushButton {{
-                background-color: {glass_fill};
-                color: {muted_text};
-                border: 1.5px solid {glass_border};
-                border-radius: 22px;
-                font-size: 20px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {glass_fill_hover};
-                border-color: {btn};
-            }}
-        """
-        self.voice_btn.setStyleSheet(self._voice_btn_qss)
+        self._voice_btn_tint = ("#FFFFFF", "#FFFFFF" if glass["dark"] else "#555555")
+        self.voice_btn.set_tint(*self._voice_btn_tint)
+        self.send_btn.set_tint(btn)
+        # 深色主题的 hover 色可能与“导出”的绿色撞色，改用主色
+        self.add_button.set_tint(btn if glass["dark"] else theme.get("hover_color", btn))
 
     def init_ui(self):
         self.setWindowTitle("MT任务助手")
@@ -5211,49 +5201,14 @@ class MainWindow(QMainWindow):
         self.chat_input.returnPressed.connect(self.send_chat_message)
         input_layout.addWidget(self.chat_input, stretch=1)
 
-        self.voice_btn = QPushButton("🎤")
-        self.voice_btn.setFixedSize(44, 44)
-        self.voice_btn.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                color: #888;
-                border: 2px solid #E8E8E8;
-                border-radius: 22px;
-                font-size: 20px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: #FFF5F7;
-                color: #FF8FAB;
-                border-color: #FFB6C1;
-            }
-        """)
+        self.voice_btn = LiquidGlassButton("🎤", tint="#FFFFFF", text_color="#555555", font_px=20)
+        self.voice_btn.setFixedSize(50, 50)
         self.voice_btn.setToolTip("语音输入")
         self.voice_btn.clicked.connect(self.voice_input)
         input_layout.addWidget(self.voice_btn)
 
-        self.send_btn = QPushButton("发送")
-        self.send_btn.setFixedSize(80, 44)
-        self.send_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF8FAB;
-                color: white;
-                border: none;
-                border-radius: 22px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #FF6B8A;
-            }
-            QPushButton:pressed {
-                background-color: #E53959;
-            }
-            QPushButton:disabled {
-                background-color: #E0E0E0;
-                color: #999;
-            }
-        """)
+        self.send_btn = LiquidGlassButton("发送", tint="#FF8FAB", font_px=14)
+        self.send_btn.setFixedSize(86, 50)
         self.send_btn.clicked.connect(self.send_chat_message)
         input_layout.addWidget(self.send_btn)
 
@@ -5266,66 +5221,31 @@ class MainWindow(QMainWindow):
         welcome_msg = "您好！我是您的 AI 助手。有什么我可以帮您的吗？您可以：\n• 告诉我您的目标，我会帮您拆解成任务\n• 询问任何问题\n• 输入「帮我出一份数学试卷」等考试相关需求"
         self._add_ai_message(welcome_msg, show_adoption=False)  # 欢迎消息不显示采纳按钮
 
-    @staticmethod
-    def _glossy_button_qss(top, bottom, hover_top, hover_bottom, pressed, font_size=14):
-        """带玻璃高光与半透明描边的渐变按钮"""
-        return f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {top}, stop:0.48 {bottom}, stop:1 {bottom});
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.55);
-                border-radius: 14px;
-                font-size: {font_size}px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {hover_top}, stop:0.48 {hover_bottom}, stop:1 {hover_bottom});
-                border: 1px solid rgba(255, 255, 255, 0.85);
-            }}
-            QPushButton:pressed {{
-                background: {pressed};
-                padding-top: 2px;
-            }}
-        """
-
     def init_bottom_bar(self, main_layout):
         bottom_widget = self._new_glass_panel(radius=18)
-        bottom_widget.setFixedHeight(76)
+        bottom_widget.setFixedHeight(78)
         bottom_layout = QHBoxLayout(bottom_widget)
-        bottom_layout.setContentsMargins(14, 12, 14, 12)
-        bottom_layout.setSpacing(12)
+        bottom_layout.setContentsMargins(12, 10, 12, 10)
+        bottom_layout.setSpacing(10)
 
-        add_button = QPushButton("➕ 添加任务")
-        add_button.setMinimumHeight(50)
-        add_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        add_button.setCursor(Qt.PointingHandCursor)
-        add_button.setStyleSheet(self._glossy_button_qss(
-            "rgba(255, 170, 192, 0.95)", "rgba(255, 107, 157, 0.92)",
-            "rgba(255, 150, 178, 0.98)", "rgba(236, 64, 122, 0.95)", "#D81B60", font_size=15))
-        add_button.clicked.connect(self._add_task_with_ripple)
-        bottom_layout.addWidget(add_button)
+        # 液态玻璃按钮：主色随主题变化，导出/删除保留语义色
+        self.add_button = LiquidGlassButton("➕ 添加任务", tint="#FF6B9D", font_px=15, radius=18)
+        self.add_button.setMinimumHeight(56)
+        self.add_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.add_button.clicked.connect(self._add_task_with_ripple)
+        bottom_layout.addWidget(self.add_button)
 
         # 添加导出按钮
-        export_button = QPushButton("📊 导出数据")
-        export_button.setMinimumHeight(50)
-        export_button.setFixedWidth(120)
-        export_button.setCursor(Qt.PointingHandCursor)
-        export_button.setStyleSheet(self._glossy_button_qss(
-            "rgba(129, 199, 132, 0.95)", "rgba(76, 175, 80, 0.92)",
-            "rgba(102, 187, 106, 0.98)", "rgba(67, 160, 71, 0.95)", "#388E3C"))
+        export_button = LiquidGlassButton("📊 导出数据", tint="#43A047", radius=18)
+        export_button.setMinimumHeight(56)
+        export_button.setFixedWidth(128)
         export_button.clicked.connect(self.export_tasks)
         bottom_layout.addWidget(export_button)
 
         # 添加批量删除按钮
-        delete_button = QPushButton("🗑️ 批量删除")
-        delete_button.setMinimumHeight(50)
-        delete_button.setFixedWidth(120)
-        delete_button.setCursor(Qt.PointingHandCursor)
-        delete_button.setStyleSheet(self._glossy_button_qss(
-            "rgba(239, 118, 115, 0.95)", "rgba(244, 67, 54, 0.92)",
-            "rgba(239, 83, 80, 0.98)", "rgba(211, 47, 47, 0.95)", "#C62828"))
+        delete_button = LiquidGlassButton("🗑️ 批量删除", tint="#E53935", radius=18)
+        delete_button.setMinimumHeight(56)
+        delete_button.setFixedWidth(128)
         delete_button.clicked.connect(self.batch_delete_tasks)
         bottom_layout.addWidget(delete_button)
 
@@ -5721,14 +5641,9 @@ class MainWindow(QMainWindow):
             self.stats_tab.refresh_stats()
 
     def _add_task_with_ripple(self):
-        """添加任务按钮点击 — 带涟漪动画"""
-        from animation_utils import RippleAnimation
-        button = self.sender()
-        if button:
-            ripple = RippleAnimation(button)
-            ripple.click_ripple()
-        # 延迟打开对话框让动画先播放
-        QTimer.singleShot(150, self.add_task)
+        """添加任务按钮点击 — 液态玻璃按钮自带水波与回弹动画"""
+        # 延迟打开对话框，让按压回弹先播放一部分
+        QTimer.singleShot(220, self.add_task)
 
     def add_task(self):
         dialog = AddTaskDialog(self)
@@ -7702,16 +7617,7 @@ class MainWindow(QMainWindow):
             return
 
         self.voice_btn.setText("🔴")
-        self.voice_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255, 77, 77, 0.9);
-                color: white;
-                border: none;
-                border-radius: 21px;
-                font-size: 20px;
-                padding: 0px;
-            }
-        """)
+        self.voice_btn.set_tint("#FF4D4D", "#FFFFFF")
 
         self._voice_dialog = VoiceInputDialog(self)
         self._voice_thread = VoiceRecognitionThread(model_path)
@@ -7759,7 +7665,7 @@ class MainWindow(QMainWindow):
             self._voice_timeout_timer.stop()
         if hasattr(self, 'voice_btn'):
             self.voice_btn.setText("🎤")
-            self.voice_btn.setStyleSheet(getattr(self, "_voice_btn_qss", ""))
+            self.voice_btn.set_tint(*getattr(self, "_voice_btn_tint", ("#FFFFFF", "#555555")))
 
 
 def _exception_hook(exc_type, exc_value, exc_tb):

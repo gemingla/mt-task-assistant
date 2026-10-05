@@ -3,6 +3,7 @@
 - AuroraBackground: 流动极光背景（主题色光斑缓慢漂移 + 鼠标跟随光晕 + 磨砂颗粒）
 - GlassPanel: 毛玻璃面板（半透明填充 + 顶部高光 + 渐变描边 + 悬停发光 + 周期性流光）
 - GlassTabWidget: 带滑动玻璃指示器的标签页，切换时淡出旧页面
+- LiquidGlassButton: 液态玻璃按钮（折射背景、果冻按压回弹、跟随鼠标的高光、点击水波）
 - SlidingPill: 分段控件的滑动高亮块
 - fade_in_window: 窗口启动淡入
 
@@ -13,14 +14,14 @@ import math
 import random
 
 from PyQt5.QtCore import (
-    Qt, QTimer, QElapsedTimer, QPointF, QRectF, QRect, QVariantAnimation,
+    Qt, QTimer, QElapsedTimer, QPoint, QPointF, QRectF, QRect, QVariantAnimation,
     QPropertyAnimation, QEasingCurve, QEvent, QObject,
 )
 from PyQt5.QtGui import (
     QColor, QPainter, QImage, QPixmap, QRadialGradient, QLinearGradient,
     QPainterPath, QPen, QBrush, QCursor,
 )
-from PyQt5.QtWidgets import QWidget, QFrame, QTabBar, QTabWidget
+from PyQt5.QtWidgets import QWidget, QFrame, QTabBar, QTabWidget, QPushButton
 
 
 # ==================== 颜色工具 ====================
@@ -242,11 +243,21 @@ class AuroraBackground(QWidget):
         return img
 
     def paintEvent(self, event):
+        self._buffer = self._render_buffer()
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        p.drawImage(QRect(0, 0, self.width(), self.height()), self._render_buffer())
+        p.drawImage(QRect(0, 0, self.width(), self.height()), self._buffer)
         p.drawTiledPixmap(self.rect(), self._grain)
         p.end()
+
+    def lens_source(self, rect):
+        """把本控件坐标系中的矩形换算到低分辨率缓冲区坐标，供液态玻璃折射采样"""
+        buf = getattr(self, "_buffer", None)
+        if buf is None or self.width() == 0 or self.height() == 0:
+            return None, QRectF()
+        sx = buf.width() / self.width()
+        sy = buf.height() / self.height()
+        return buf, QRectF(rect.x() * sx, rect.y() * sy, rect.width() * sx, rect.height() * sy)
 
 
 # ==================== 毛玻璃面板 ====================
@@ -370,6 +381,252 @@ class GlassPanel(QFrame):
         p.setPen(QPen(QBrush(edge), 1.4))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
+        p.end()
+
+
+# ==================== 液态玻璃按钮 ====================
+
+class LiquidGlassButton(QPushButton):
+    """
+    液态玻璃按钮：
+    - 像透镜一样折射身后的动态背景（边缘折射更强，产生液体般的扭曲）
+    - 着色玻璃体 + 顶部镜面高光 + 底部焦散光 + 明亮的玻璃轮廓
+    - 高光跟随鼠标移动；按下时果冻般挤压，松开后弹性回弹；点击处泛起水波
+    """
+
+    MARGIN = 3  # 为挤压形变和阴影预留的边距
+
+    def __init__(self, text="", parent=None, tint="#FF8FAB", text_color="#FFFFFF",
+                 font_px=14, radius=None):
+        super().__init__(text, parent)
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        # 自己的样式表优先级高于主窗口的全局 QPushButton 规则，用它固定字号
+        self.setStyleSheet(f"QPushButton {{ font-size: {font_px}px; font-weight: bold; }}")
+        self._tint = QColor(tint)
+        self._text_color = QColor(text_color)
+        self._radius = radius
+        self._hover = 0.0
+        self._press = 0.0
+        self._mouse = QPointF(-1, -1)
+        self._ripples = []
+        self._aurora = None
+
+        self._hover_anim = QVariantAnimation(self)
+        self._hover_anim.setDuration(280)
+        self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._hover_anim.valueChanged.connect(lambda v: self._set("_hover", v))
+
+        self._press_anim = QVariantAnimation(self)
+        self._press_anim.valueChanged.connect(lambda v: self._set("_press", v))
+
+    # ---------- 公共接口 ----------
+
+    def set_tint(self, tint, text_color=None):
+        self._tint = QColor(tint)
+        if text_color is not None:
+            self._text_color = QColor(text_color)
+        self.update()
+
+    # ---------- 动画 ----------
+
+    def _set(self, name, value):
+        setattr(self, name, float(value))
+        self.update()
+
+    def _animate(self, anim, start, end, duration, curve):
+        anim.stop()
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setDuration(duration)
+        anim.setEasingCurve(curve)
+        anim.start()
+
+    def enterEvent(self, event):
+        self._animate(self._hover_anim, self._hover, 1.0, 280, QEasingCurve(QEasingCurve.OutCubic))
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._animate(self._hover_anim, self._hover, 0.0, 420, QEasingCurve(QEasingCurve.OutCubic))
+        super().leaveEvent(event)
+
+    def mouseMoveEvent(self, event):
+        self._mouse = QPointF(event.pos())
+        self.update()
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self._animate(self._press_anim, self._press, 1.0, 140, QEasingCurve(QEasingCurve.OutCubic))
+            self._add_ripple(QPointF(event.pos()))
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            spring = QEasingCurve(QEasingCurve.OutElastic)
+            spring.setAmplitude(1.0)
+            spring.setPeriod(0.32)
+            self._animate(self._press_anim, self._press, 0.0, 750, spring)
+        super().mouseReleaseEvent(event)
+
+    def _add_ripple(self, pos):
+        ripple = {"pos": pos, "t": 0.0}
+        anim = QVariantAnimation(self)
+        anim.setDuration(650)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        def step(v):
+            ripple["t"] = float(v)
+            self.update()
+
+        anim.valueChanged.connect(step)
+        anim.finished.connect(lambda: self._ripples.remove(ripple) if ripple in self._ripples else None)
+        anim.start(QVariantAnimation.DeleteWhenStopped)
+        self._ripples.append(ripple)
+
+    # ---------- 绘制 ----------
+
+    def _find_aurora(self):
+        if self._aurora is None:
+            w = self.parentWidget()
+            while w is not None and not isinstance(w, AuroraBackground):
+                w = w.parentWidget()
+            self._aurora = w
+        return self._aurora
+
+    def _draw_lens(self, p, body, path, radius):
+        """把身后的背景放大后画进玻璃体：中心轻微放大，边缘一圈强放大，模拟液体透镜折射"""
+        aurora = self._find_aurora()
+        if aurora is None:
+            return False
+        origin = self.mapTo(aurora, QPoint(0, 0))
+        target = body.translated(origin.x(), origin.y())
+        buf, src = aurora.lens_source(target)
+        if buf is None:
+            return False
+
+        def zoomed(rect, factor):
+            c = rect.center()
+            w, h = rect.width() / factor, rect.height() / factor
+            return QRectF(c.x() - w / 2, c.y() - h / 2, w, h)
+
+        p.save()
+        p.setClipPath(path)
+        p.drawImage(body, buf, zoomed(src, 1.08))
+        # 边缘折射环
+        rim = max(4.0, min(body.height() * 0.16, 9.0))
+        inner = QPainterPath()
+        inner.addRoundedRect(body.adjusted(rim, rim, -rim, -rim), max(0.0, radius - rim), max(0.0, radius - rim))
+        p.setClipPath(path.subtracted(inner))
+        p.setOpacity(0.85)
+        p.drawImage(body, buf, zoomed(src, 1.45))
+        p.restore()
+        return True
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        enabled = self.isEnabled()
+        if not enabled:
+            p.setOpacity(0.55)
+
+        m = self.MARGIN
+        full = QRectF(self.rect())
+        # 果冻挤压：按下时横向略胀、纵向压扁
+        sx = 1 + 0.035 * self._press
+        sy = 1 - 0.075 * self._press
+        c = full.center()
+        p.translate(c)
+        p.scale(sx, sy)
+        p.translate(-c)
+
+        body = full.adjusted(m + 0.5, m + 0.5, -m - 0.5, -m - 0.5)
+        radius = min(self._radius if self._radius is not None else body.height() / 2, body.height() / 2)
+        path = QPainterPath()
+        path.addRoundedRect(body, radius, radius)
+
+        # 1. 柔和投影
+        shadow = QPainterPath()
+        shadow.addRoundedRect(body.translated(0, 1.8 - self._press), radius, radius)
+        p.fillPath(shadow, QColor(0, 0, 0, int(30 + 12 * self._hover)))
+
+        # 2. 折射身后的背景
+        refracted = self._draw_lens(p, body, path, radius)
+
+        # 3. 着色玻璃体
+        tint = QColor(self._tint) if enabled else QColor(170, 170, 180)
+        base_alpha = 190 if refracted else 235
+        tg = QLinearGradient(body.topLeft(), body.bottomLeft())
+        tg.setColorAt(0, with_alpha(tint.lighter(108), min(255, base_alpha - 30 + 30 * self._hover)))
+        tg.setColorAt(1, with_alpha(tint, min(255, base_alpha + 30 * self._hover)))
+        p.fillPath(path, tg)
+
+        p.save()
+        p.setClipPath(path)
+        # 4. 底部焦散光（光线穿过玻璃在底部汇聚）
+        caustic = QRadialGradient(QPointF(body.center().x(), body.bottom() + body.height() * 0.15),
+                                  body.width() * 0.55)
+        caustic.setColorAt(0, QColor(255, 255, 255, int(45 + 40 * self._hover)))
+        caustic.setColorAt(1, QColor(255, 255, 255, 0))
+        p.fillRect(body, caustic)
+
+        # 5. 顶部镜面高光（一条内收的弧形亮带）
+        inset = 1.6
+        gloss_rect = QRectF(body.left() + inset, body.top() + inset,
+                            body.width() - inset * 2, body.height() * 0.46)
+        gloss = QPainterPath()
+        gloss.addRoundedRect(gloss_rect, max(0.0, radius - inset), max(0.0, radius - inset))
+        gg = QLinearGradient(gloss_rect.topLeft(), gloss_rect.bottomLeft())
+        gg.setColorAt(0, QColor(255, 255, 255, int(110 + 40 * self._hover)))
+        gg.setColorAt(1, QColor(255, 255, 255, 8))
+        p.fillPath(gloss, gg)
+
+        # 6. 跟随鼠标的高光
+        if self._hover > 0.01 and self._mouse.x() >= 0:
+            r = body.height() * 1.3
+            mg = QRadialGradient(self._mouse, r)
+            mg.setColorAt(0, QColor(255, 255, 255, int(110 * self._hover)))
+            mg.setColorAt(1, QColor(255, 255, 255, 0))
+            p.fillRect(body, mg)
+
+        # 7. 点击水波
+        for rp in self._ripples:
+            t = rp["t"]
+            r = body.width() * 1.1 * t
+            rg = QRadialGradient(rp["pos"], max(1.0, r))
+            a = int(120 * (1 - t))
+            rg.setColorAt(0, QColor(255, 255, 255, 0))
+            rg.setColorAt(0.7, QColor(255, 255, 255, a // 3))
+            rg.setColorAt(0.92, QColor(255, 255, 255, a))
+            rg.setColorAt(1, QColor(255, 255, 255, 0))
+            p.fillRect(body, rg)
+        p.restore()
+
+        # 8. 玻璃轮廓：上沿最亮、两侧淡、下沿反光
+        rim = QLinearGradient(body.topLeft(), body.bottomLeft())
+        rim.setColorAt(0, QColor(255, 255, 255, 235))
+        rim.setColorAt(0.45, QColor(255, 255, 255, 50))
+        rim.setColorAt(1, QColor(255, 255, 255, 160))
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QBrush(rim), 1.3))
+        p.drawPath(path)
+        inner_rim = QPainterPath()
+        inner_rim.addRoundedRect(body.adjusted(1.4, 1.4, -1.4, -1.4), max(0.0, radius - 1.4), max(0.0, radius - 1.4))
+        p.setPen(QPen(with_alpha(tint.darker(135), 70), 1.0))
+        p.drawPath(inner_rim)
+
+        # 9. 文字（带轻微投影增强可读性）
+        p.setFont(self.font())
+        text_rect = body.adjusted(6, 0, -6, 0)
+        if self._text_color.lightness() > 160:
+            p.setPen(with_alpha(tint.darker(170), 150))
+            p.drawText(text_rect.translated(0, 1.2), Qt.AlignCenter, self.text())
+        p.setPen(self._text_color)
+        p.drawText(text_rect, Qt.AlignCenter, self.text())
         p.end()
 
 
