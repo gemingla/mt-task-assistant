@@ -196,7 +196,10 @@ class CalendarWidget(QWidget):
         layout.addWidget(self.task_scroll)
 
         self.update_calendar()
-        self.setStyleSheet("background-color: white;")
+        # 半透明底，透出主窗口的动态玻璃背景
+        self.setObjectName("calendarRoot")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("QWidget#calendarRoot { background-color: rgba(255, 255, 255, 0.45); border-radius: 14px; }")
 
     def update_calendar(self):
         """更新日历显示"""

@@ -73,7 +73,7 @@ from PyQt5.QtWidgets import (
     QGraphicsDropShadowEffect, QSpinBox, QComboBox, QDateTimeEdit,
     QListWidget, QListWidgetItem, QAbstractItemView, QWizard, QSystemTrayIcon,
     QWizardPage, QTextBrowser, QColorDialog, QGroupBox, QVBoxLayout as QGVBoxLayout,
-    QSizePolicy
+    QSizePolicy, QMenuBar
 )
 from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty, QVariantAnimation, pyqtSignal, QPoint, QMimeData, QTimer, QSize, QThread, QDateTime, QTime
 from PyQt5.QtGui import QFont, QColor, QDrag, QPixmap, QIcon
@@ -175,6 +175,10 @@ from glass_style import (
     apply_combobox_style, apply_textedit_style, set_completed_style, FadeAnimation,
     GLOBAL_BG_COLOR, THEME_COLOR, HOVER_COLOR, CARD_BG_COLOR, TEXT_COLOR, SUBTEXT_COLOR, COMPLETED_BG_COLOR
 )
+from glass_effects import (
+    AuroraBackground, GlassPanel, GlassTabWidget, SlidingPill,
+    glass_palette, fade_in_window, make_scroll_areas_transparent,
+)
 
 try:
     import speech_recognition as sr
@@ -215,7 +219,7 @@ class TaskCardWidget(QFrame):
     def __init__(self, task, task_manager, stats_manager, tag_manager, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setAutoFillBackground(True)
+        self.setAutoFillBackground(False)  # 半透明玻璃卡片，不能先铺不透明底色
         self.task = task
         self.task_manager = task_manager
         self.stats_manager = stats_manager
@@ -375,9 +379,9 @@ class TaskCardWidget(QFrame):
     def update_completed_style(self):
         if self.task.completed:
             self.setStyleSheet("""
-                QFrame {
-                    background-color: #F0FDF4;
-                    border: 1.5px solid #86EFAC;
+                QFrame#taskCardWidget {
+                    background-color: rgba(240, 253, 244, 0.62);
+                    border: 1.5px solid rgba(134, 239, 172, 0.85);
                     border-radius: 14px;
                 }
             """)
@@ -386,14 +390,16 @@ class TaskCardWidget(QFrame):
             self.focus_btn.hide()
         else:
             self.setStyleSheet("""
-                QFrame {
-                    background-color: #FFFFFF;
-                    border: 1px solid #E8E8E8;
+                QFrame#taskCardWidget {
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.86), stop:1 rgba(255, 255, 255, 0.62));
+                    border: 1px solid rgba(255, 255, 255, 0.95);
                     border-radius: 14px;
                 }
-                QFrame:hover {
-                    border: 1.5px solid #FFB3CC;
-                    background-color: #FFFAFB;
+                QFrame#taskCardWidget:hover {
+                    border: 1.5px solid rgba(255, 143, 171, 0.85);
+                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.96), stop:1 rgba(255, 250, 251, 0.80));
                 }
             """)
             self.name_label.setStyleSheet("color: #333333; background-color: transparent;")
@@ -4609,13 +4615,23 @@ class MainWindow(QMainWindow):
         toolbar_bg = card if dark_bg else "#FFFFFF"
         toolbar_text = card_text if dark_bg else "#333333"
 
+        # 主窗口内部的控件铺在动态玻璃背景上，因此这里不再给 QWidget 统一刷底色
+        glass = glass_palette(theme)
+        panel_text = "#FFFFFF" if glass["dark"] else "#1F1F2B"
+        muted_text = "rgba(255,255,255,0.65)" if glass["dark"] else "rgba(40,40,60,0.55)"
+        glass_fill = "rgba(255,255,255,0.10)" if glass["dark"] else "rgba(255,255,255,0.55)"
+        glass_fill_hover = "rgba(255,255,255,0.16)" if glass["dark"] else "rgba(255,255,255,0.78)"
+        glass_border = "rgba(255,255,255,0.22)" if glass["dark"] else "rgba(255,255,255,0.85)"
+
         qss = f"""
             QMainWindow {{
                 background-color: {bg};
             }}
             QWidget {{
-                background-color: {bg};
                 color: {main_text};
+            }}
+            QWidget#glassRoot QLabel {{
+                color: {panel_text};
             }}
             QFrame#task-card {{
                 background-color: {card};
@@ -4667,54 +4683,64 @@ class MainWindow(QMainWindow):
                 border: 2px solid {btn};
             }}
             QTabWidget::pane {{
-                border: 1px solid {border};
-                border-radius: 8px;
-                background-color: {card};
+                border: none;
+                background: transparent;
             }}
-            QTabBar::tab {{
-                background-color: {bg};
-                color: {main_text};
-                padding: 8px 16px;
-                border: 1px solid {border};
-                border-bottom: none;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-            }}
-            QTabBar::tab:hover {{
-                background-color: {card};
-            }}
-            QTabBar::tab:selected {{
-                background-color: {card};
-                color: {btn};
-                border-bottom: 2px solid {btn};
-                font-weight: bold;
-            }}
-            QScrollArea {{
-                background-color: {bg};
+            QScrollArea, QListWidget {{
+                background: transparent;
                 border: none;
             }}
-            QLabel {{
-                color: {main_text};
+            QSplitter::handle {{
+                background: transparent;
             }}
-            QMenuBar {{
-                background-color: {toolbar_bg};
-                color: {toolbar_text};
-                border-bottom: 1px solid {border};
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 10px;
+                margin: 4px 2px 4px 0;
             }}
-            QMenuBar::item:selected {{
-                background-color: {btn};
-                color: {btn_text};
+            QScrollBar::handle:vertical {{
+                background: {muted_text};
+                border-radius: 4px;
+                min-height: 36px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {btn};
+            }}
+            QScrollBar:horizontal {{
+                background: transparent;
+                height: 10px;
+                margin: 0 4px 2px 4px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {muted_text};
+                border-radius: 4px;
+                min-width: 36px;
+            }}
+            QScrollBar::add-line, QScrollBar::sub-line {{
+                width: 0; height: 0;
+            }}
+            QScrollBar::add-page, QScrollBar::sub-page {{
+                background: transparent;
             }}
             QMenu {{
                 background-color: {card};
                 color: {card_text};
                 border: 1px solid {border};
+                border-radius: 10px;
+                padding: 6px;
+            }}
+            QMenu::item {{
+                padding: 8px 22px;
                 border-radius: 6px;
-                padding: 4px;
             }}
             QMenu::item:selected {{
                 background-color: {btn};
                 color: {btn_text};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {border};
+                margin: 5px 10px;
             }}
             QGroupBox {{
                 color: {main_text};
@@ -4739,20 +4765,9 @@ class MainWindow(QMainWindow):
             QSpinBox:focus {{
                 border: 2px solid {btn};
             }}
-            QListWidget {{
-                background-color: {bg};
-                border: none;
-                color: {main_text};
-            }}
             QListWidget::item {{
-                background-color: {card};
+                background-color: transparent;
                 border-radius: 8px;
-                padding: 8px;
-                margin-bottom: 6px;
-            }}
-            QListWidget::item:selected {{
-                background-color: {btn};
-                color: {btn_text};
             }}
             QTextBrowser {{
                 background-color: {card};
@@ -4781,22 +4796,14 @@ class MainWindow(QMainWindow):
             QDialog {{
                 background-color: {bg};
             }}
-            #toolbar {{
-                background-color: {toolbar_bg};
-                border-bottom: 1px solid {border};
-            }}
-            #toolbar QLabel {{
-                color: {toolbar_text};
-            }}
         """
         self.setStyleSheet(qss)
 
-        if hasattr(self, 'toolbar_widget'):
-            self.toolbar_widget.setStyleSheet(f"background-color: {toolbar_bg}; border-bottom: 1px solid {border};")
         if hasattr(self, 'toolbar_title'):
-            self.toolbar_title.setStyleSheet(f"color: {toolbar_text};")
+            self.toolbar_title.setStyleSheet(f"color: {panel_text}; background: transparent; font-size: 17px; font-weight: bold;")
         if hasattr(self, 'left_title'):
-            self.left_title.setStyleSheet(f"color: {main_text};")
+            self.left_title.setStyleSheet(f"color: {panel_text};")
+        self._apply_glass_theme(theme, glass, panel_text, muted_text, glass_fill, glass_fill_hover, glass_border)
 
         try:
             import glass_style
@@ -4806,6 +4813,129 @@ class MainWindow(QMainWindow):
             glass_style.CARD_BG_COLOR = card
         except:
             pass
+
+    def _apply_glass_theme(self, theme, glass, panel_text, muted_text, glass_fill, glass_fill_hover, glass_border):
+        """把当前主题同步到动态背景、玻璃面板和各个玻璃化控件"""
+        if not hasattr(self, 'aurora'):
+            return
+        btn = theme["button_color"]
+        self._glass_colors = {"text": panel_text, "muted": muted_text, "fill": glass_fill,
+                              "fill_hover": glass_fill_hover, "border": glass_border, "accent": btn}
+        self.aurora.set_theme(theme)
+        for panel in self.glass_panels:
+            panel.set_theme(glass)
+
+        # 深色主题下主题色文字对比度不足，选中态改用提亮后的主题色
+        tab_accent = QColor(btn).lighter(170).name() if glass["dark"] else btn
+        self.tab_widget.glass_tab_bar().set_colors(tab_accent, glass["dark"])
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{ border: none; background: transparent; }}
+            QTabBar {{ background: transparent; }}
+            QTabBar::tab {{
+                background: transparent;
+                color: {muted_text};
+                padding: 9px 13px;
+                margin: 4px 1px;
+                font-size: 13px;
+                font-weight: 500;
+                border: none;
+            }}
+            QTabBar::tab:hover {{ color: {tab_accent}; }}
+            QTabBar::tab:selected {{ color: {tab_accent}; font-weight: 600; }}
+            QTabBar QToolButton {{
+                background: {glass_fill_hover};
+                border: 1px solid {glass_border};
+                border-radius: 8px;
+                margin: 6px 1px;
+            }}
+        """)
+
+        self.menu_bar.setStyleSheet(f"""
+            QMenuBar {{
+                background: transparent;
+                border: none;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QMenuBar::item {{
+                padding: 6px 14px;
+                background: transparent;
+                color: {panel_text};
+                border-radius: 8px;
+                margin: 0 1px;
+            }}
+            QMenuBar::item:selected {{
+                background: {glass_fill_hover};
+                color: {btn};
+            }}
+            QMenuBar::item:pressed {{
+                background: {btn};
+                color: white;
+            }}
+        """)
+
+        input_style = f"""
+            background-color: {glass_fill};
+            border: 1.5px solid {glass_border};
+            border-radius: 10px;
+            padding: 0 14px;
+            font-size: 13px;
+            color: {panel_text};
+        """
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{ {input_style} }}
+            QLineEdit:hover {{ background-color: {glass_fill_hover}; }}
+            QLineEdit:focus {{ border: 1.5px solid {btn}; background-color: {glass_fill_hover}; }}
+        """)
+        self.tag_filter_combo.setStyleSheet(f"""
+            QComboBox {{ {input_style} }}
+            QComboBox:hover {{ background-color: {glass_fill_hover}; border: 1.5px solid {btn}; }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid {muted_text};
+                margin-right: 10px;
+            }}
+        """)
+        self.segment_container.setStyleSheet(f"""
+            QFrame#segmentContainer {{
+                background-color: {glass_fill};
+                border: 1px solid {glass_border};
+                border-radius: 11px;
+            }}
+        """)
+        self.filter_pill.set_color(btn)
+        self._update_filter_buttons()
+
+        self.chat_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1.5px solid {glass_border};
+                border-radius: 23px;
+                padding: 10px 20px;
+                font-size: 14px;
+                background-color: {glass_fill};
+                color: {panel_text};
+            }}
+            QLineEdit:hover {{ background-color: {glass_fill_hover}; }}
+            QLineEdit:focus {{ border-color: {btn}; background-color: {glass_fill_hover}; }}
+        """)
+        self._voice_btn_qss = f"""
+            QPushButton {{
+                background-color: {glass_fill};
+                color: {muted_text};
+                border: 1.5px solid {glass_border};
+                border-radius: 22px;
+                font-size: 20px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {glass_fill_hover};
+                border-color: {btn};
+            }}
+        """
+        self.voice_btn.setStyleSheet(self._voice_btn_qss)
 
     def init_ui(self):
         self.setWindowTitle("MT任务助手")
@@ -4817,77 +4947,62 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1000, 700)
 
-        self.refresh_style()
-        self.create_menu_bar()
+        # 动态玻璃背景作为 central widget，所有面板都浮在它上面
+        self.aurora = AuroraBackground()
+        self.glass_panels = []
+        self.setCentralWidget(self.aurora)
+        main_layout = QVBoxLayout(self.aurora)
+        main_layout.setContentsMargins(14, 10, 14, 14)
+        main_layout.setSpacing(10)
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        toolbar_widget = QWidget()
+        # 顶部玻璃标题栏（标题 + 菜单）
+        toolbar_widget = self._new_glass_panel(radius=16)
         toolbar_widget.setObjectName("toolbar")
         self.toolbar_widget = toolbar_widget
-        toolbar_widget.setStyleSheet("background-color: white; border-bottom: 1px solid #F0F0F0;")
         toolbar_layout = QHBoxLayout(toolbar_widget)
-        toolbar_layout.setContentsMargins(self.scale_size(15), self.scale_size(5), self.scale_size(15), self.scale_size(5))
+        toolbar_layout.setContentsMargins(self.scale_size(16), self.scale_size(6), self.scale_size(12), self.scale_size(6))
+        toolbar_layout.setSpacing(12)
 
         title_label = QLabel("📝 MT任务助手")
         title_label.setFont(QFont("Microsoft YaHei", self.scale_font(14), QFont.Bold))
         self.toolbar_title = title_label
-        title_label.setStyleSheet("color: #333333; font-size: 15px;")
         toolbar_layout.addWidget(title_label)
 
+        self.menu_bar = QMenuBar(toolbar_widget)
+        self.create_menu_bar()
+        toolbar_layout.addWidget(self.menu_bar, 0, Qt.AlignVCenter)
         toolbar_layout.addStretch()
 
         main_layout.addWidget(toolbar_widget)
 
         content_splitter = QSplitter(Qt.Horizontal)
+        content_splitter.setHandleWidth(10)
+        content_splitter.setChildrenCollapsible(False)
 
-        left_widget = QWidget()
+        left_widget = self._new_glass_panel()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setContentsMargins(14, 14, 14, 10)
 
         left_title = QLabel("📋 任务列表")
         left_title.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
         self.left_title = left_title
-        left_title.setStyleSheet("color: #333333;")
 
         filter_layout = QHBoxLayout()
         filter_layout.setSpacing(8)
 
-        # 分段控件容器
+        # 分段控件容器（选中项下方有滑动的高亮块）
         segment_container = QFrame()
         segment_container.setObjectName("segmentContainer")
-        segment_container.setStyleSheet("""
-            QFrame#segmentContainer {
-                background-color: #F0F2F8;
-                border-radius: 10px;
-                padding: 3px;
-            }
-        """)
+        self.segment_container = segment_container
         segment_layout = QHBoxLayout(segment_container)
         segment_layout.setContentsMargins(3, 3, 3, 3)
         segment_layout.setSpacing(0)
+        self.filter_pill = SlidingPill(segment_container)
 
         self.filter_all_btn = QPushButton("全部")
         self.filter_all_btn.setFixedHeight(30)
         self.filter_all_btn.setFixedWidth(70)
         self.filter_all_btn.setCursor(Qt.PointingHandCursor)
-        self.filter_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF6B9D;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #EC407A;
-            }
-        """)
         self.filter_all_btn.clicked.connect(lambda: self.set_task_filter("all"))
         segment_layout.addWidget(self.filter_all_btn)
 
@@ -4895,20 +5010,6 @@ class MainWindow(QMainWindow):
         self.filter_today_btn.setFixedHeight(30)
         self.filter_today_btn.setFixedWidth(80)
         self.filter_today_btn.setCursor(Qt.PointingHandCursor)
-        self.filter_today_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #888888;
-                border: none;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 107, 157, 0.08);
-                color: #FF6B9D;
-            }
-        """)
         self.filter_today_btn.clicked.connect(lambda: self.set_task_filter("today"))
         segment_layout.addWidget(self.filter_today_btn)
 
@@ -4917,26 +5018,12 @@ class MainWindow(QMainWindow):
         # 搜索框
         search_container = QWidget()
         search_container.setFixedWidth(200)
-        search_container.setStyleSheet("background: transparent;")
         search_layout = QHBoxLayout(search_container)
         search_layout.setContentsMargins(0, 0, 0, 0)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 搜索任务...")
         self.search_input.setFixedHeight(36)
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #F5F7FA;
-                border: 1.5px solid #E8E8E8;
-                border-radius: 10px;
-                padding: 0 14px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1.5px solid #FF6B9D;
-                background-color: white;
-            }
-        """)
         self.search_input.textChanged.connect(self.on_search_changed)
         search_layout.addWidget(self.search_input)
         filter_layout.addWidget(search_container)
@@ -4947,44 +5034,24 @@ class MainWindow(QMainWindow):
         self.tag_filter_combo.setFixedHeight(36)
         self.tag_filter_combo.setFixedWidth(120)
         self.tag_filter_combo.setCursor(Qt.PointingHandCursor)
-        self.tag_filter_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #F5F7FA;
-                border: 1.5px solid #E8E8E8;
-                border-radius: 10px;
-                padding: 0 14px;
-                font-size: 13px;
-            }
-            QComboBox:hover {
-                border: 1.5px solid rgba(255, 107, 157, 0.4);
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid #999;
-                margin-right: 10px;
-            }
-        """)
         self.tag_filter_combo.currentTextChanged.connect(self.on_tag_filter_changed)
         filter_layout.addWidget(self.tag_filter_combo)
-        
+
         filter_layout.addStretch()
         left_layout.addLayout(filter_layout)
         self.current_filter = "all"
         self.current_search = ""
         self.current_tag = "所有标签"
-        
+
         # 初始化标签筛选下拉框
         self.update_tag_filter()
 
         self.task_list_widget = QListWidget()
         self.task_list_widget.setDragDropMode(QAbstractItemView.InternalMove)
         self.task_list_widget.setSelectionMode(QListWidget.SingleSelection)
-        self.task_list_widget.setSpacing(10)
+        self.task_list_widget.setSpacing(6)
+        self.task_list_widget.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.task_list_widget.verticalScrollBar().setSingleStep(12)
         self.task_list_widget.setStyleSheet("""
             QListWidget {
                 border: none;
@@ -5002,14 +5069,12 @@ class MainWindow(QMainWindow):
 
         content_splitter.addWidget(left_widget)
 
-        right_widget = QWidget()
+        right_widget = self._new_glass_panel()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(8, 6, 8, 8)
 
-        self.tab_widget = QTabWidget()
+        self.tab_widget = GlassTabWidget()
         self.tab_widget.setMinimumHeight(300)
-        apply_tab_style(self.tab_widget)
-        # tab切换动画已移除（QGraphicsOpacityEffect导致子控件渲染异常）
 
         self.ai_tab = QWidget()
         self.init_ai_tab()
@@ -5036,54 +5101,27 @@ class MainWindow(QMainWindow):
 
         self.init_bottom_bar(main_layout)
 
-    def create_menu_bar(self):
-        menubar = self.menuBar()
+        make_scroll_areas_transparent(self.aurora)
+        self.refresh_style()
+        self.aurora.set_animated(self.config_manager.load_config().get("glass_animation", True))
+        self.filter_pill.move_to(self.filter_all_btn, animate=False)
 
-        menubar.setStyleSheet("""
-            QMenuBar {
-                background-color: white;
-                border-bottom: 2px solid #F0F0F0;
-                padding: 4px 0;
-                font-size: 13px;
-                font-weight: 500;
-            }
-            QMenuBar::item {
-                padding: 8px 16px;
-                background-color: transparent;
-                color: #333333;
-                border-radius: 6px;
-                margin: 0 2px;
-            }
-            QMenuBar::item:selected {
-                background-color: #FFF0F3;
-                color: #FF6B9D;
-            }
-            QMenuBar::item:pressed {
-                background-color: #FF8FAB;
-                color: white;
-            }
-            QMenu {
-                background-color: white;
-                border: 2px solid #F0F0F0;
-                border-radius: 8px;
-                padding: 8px 0;
-            }
-            QMenu::item {
-                padding: 10px 24px;
-                color: #333333;
-                font-size: 13px;
-            }
-            QMenu::item:selected {
-                background-color: #FFF0F3;
-                color: #FF8FAB;
-                border-radius: 0;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #F0F0F0;
-                margin: 6px 12px;
-            }
-        """)
+    def _new_glass_panel(self, radius=18):
+        panel = GlassPanel(radius=radius)
+        self.glass_panels.append(panel)
+        return panel
+
+    def toggle_glass_animation(self, enabled):
+        """菜单：开关动态玻璃背景（关闭后保留玻璃外观，只停止动画）"""
+        self.aurora.set_animated(enabled)
+        for panel in self.glass_panels:
+            panel.set_sheen_enabled(enabled)
+        config = self.config_manager.load_config()
+        config["glass_animation"] = bool(enabled)
+        self.config_manager.save_config(config)
+
+    def create_menu_bar(self):
+        menubar = self.menu_bar
 
         file_menu = menubar.addMenu("文件")
         exit_action = file_menu.addAction("退出")
@@ -5098,6 +5136,10 @@ class MainWindow(QMainWindow):
         theme_action.triggered.connect(self.open_theme_settings)
         tag_manager_action = settings_menu.addAction("🏷️ 标签管理")
         tag_manager_action.triggered.connect(self.open_tag_manager)
+        glass_action = settings_menu.addAction("✨ 动态玻璃背景")
+        glass_action.setCheckable(True)
+        glass_action.setChecked(self.config_manager.load_config().get("glass_animation", True))
+        glass_action.toggled.connect(self.toggle_glass_animation)
         settings_menu.addSeparator()
         backup_action = settings_menu.addAction("💾 数据备份/恢复")
         backup_action.triggered.connect(self.show_backup_dialog)
@@ -5128,8 +5170,9 @@ class MainWindow(QMainWindow):
 
         self.chat_scroll = QScrollArea()
         self.chat_scroll.setWidgetResizable(True)
-        self.chat_scroll.setStyleSheet("border: none; background-color: #F5F7FA;")
+        self.chat_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.chat_scroll.verticalScrollBar().setSingleStep(14)
 
         self.chat_container = QWidget()
         self.chat_container_layout = QVBoxLayout(self.chat_container)
@@ -5141,7 +5184,6 @@ class MainWindow(QMainWindow):
         ai_layout.addWidget(self.chat_scroll, stretch=1)
 
         input_container = QWidget()
-        input_container.setStyleSheet("background-color: rgba(255,255,255,0.92); border-top: 1px solid rgba(0,0,0,0.06);")
         input_layout = QHBoxLayout(input_container)
         input_layout.setContentsMargins(12, 10, 12, 10)
         input_layout.setSpacing(10)
@@ -5224,43 +5266,44 @@ class MainWindow(QMainWindow):
         welcome_msg = "您好！我是您的 AI 助手。有什么我可以帮您的吗？您可以：\n• 告诉我您的目标，我会帮您拆解成任务\n• 询问任何问题\n• 输入「帮我出一份数学试卷」等考试相关需求"
         self._add_ai_message(welcome_msg, show_adoption=False)  # 欢迎消息不显示采纳按钮
 
+    @staticmethod
+    def _glossy_button_qss(top, bottom, hover_top, hover_bottom, pressed, font_size=14):
+        """带玻璃高光与半透明描边的渐变按钮"""
+        return f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {top}, stop:0.48 {bottom}, stop:1 {bottom});
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.55);
+                border-radius: 14px;
+                font-size: {font_size}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {hover_top}, stop:0.48 {hover_bottom}, stop:1 {hover_bottom});
+                border: 1px solid rgba(255, 255, 255, 0.85);
+            }}
+            QPushButton:pressed {{
+                background: {pressed};
+                padding-top: 2px;
+            }}
+        """
+
     def init_bottom_bar(self, main_layout):
-        bottom_widget = QWidget()
-        bottom_widget.setFixedHeight(75)
-        bottom_widget.setStyleSheet(f"""
-            background-color: rgba(255, 255, 255, 0.95);
-            border-top: 1px solid rgba(255, 182, 193, 0.3);
-        """)
+        bottom_widget = self._new_glass_panel(radius=18)
+        bottom_widget.setFixedHeight(76)
         bottom_layout = QHBoxLayout(bottom_widget)
-        bottom_layout.setContentsMargins(20, 12, 20, 12)
+        bottom_layout.setContentsMargins(14, 12, 14, 12)
         bottom_layout.setSpacing(12)
 
         add_button = QPushButton("➕ 添加任务")
         add_button.setMinimumHeight(50)
         add_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         add_button.setCursor(Qt.PointingHandCursor)
-        add_button.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #FF8FAB,
-                    stop:1 #FF6B9D);
-                color: white;
-                border: none;
-                border-radius: 12px;
-                font-size: 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #FF6B9D,
-                    stop:1 #EC407A);
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #EC407A,
-                    stop:1 #D81B60);
-            }
-        """)
+        add_button.setStyleSheet(self._glossy_button_qss(
+            "rgba(255, 170, 192, 0.95)", "rgba(255, 107, 157, 0.92)",
+            "rgba(255, 150, 178, 0.98)", "rgba(236, 64, 122, 0.95)", "#D81B60", font_size=15))
         add_button.clicked.connect(self._add_task_with_ripple)
         bottom_layout.addWidget(add_button)
 
@@ -5269,26 +5312,9 @@ class MainWindow(QMainWindow):
         export_button.setMinimumHeight(50)
         export_button.setFixedWidth(120)
         export_button.setCursor(Qt.PointingHandCursor)
-        export_button.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #66BB6A,
-                    stop:1 #4CAF50);
-                color: white;
-                border: none;
-                border-radius: 12px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #4CAF50,
-                    stop:1 #43A047);
-            }
-            QPushButton:pressed {
-                background: #388E3C;
-            }
-        """)
+        export_button.setStyleSheet(self._glossy_button_qss(
+            "rgba(129, 199, 132, 0.95)", "rgba(76, 175, 80, 0.92)",
+            "rgba(102, 187, 106, 0.98)", "rgba(67, 160, 71, 0.95)", "#388E3C"))
         export_button.clicked.connect(self.export_tasks)
         bottom_layout.addWidget(export_button)
 
@@ -5297,26 +5323,9 @@ class MainWindow(QMainWindow):
         delete_button.setMinimumHeight(50)
         delete_button.setFixedWidth(120)
         delete_button.setCursor(Qt.PointingHandCursor)
-        delete_button.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #EF5350,
-                    stop:1 #F44336);
-                color: white;
-                border: none;
-                border-radius: 12px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #F44336,
-                    stop:1 #D32F2F);
-            }
-            QPushButton:pressed {
-                background: #C62828;
-            }
-        """)
+        delete_button.setStyleSheet(self._glossy_button_qss(
+            "rgba(239, 118, 115, 0.95)", "rgba(244, 67, 54, 0.92)",
+            "rgba(239, 83, 80, 0.98)", "rgba(211, 47, 47, 0.95)", "#C62828"))
         delete_button.clicked.connect(self.batch_delete_tasks)
         bottom_layout.addWidget(delete_button)
 
@@ -5339,63 +5348,30 @@ class MainWindow(QMainWindow):
 
     def set_task_filter(self, filter_type):
         self.current_filter = filter_type
-        if filter_type == "all":
-            self.filter_all_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #FF6B9D;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 12px;
-                    font-weight: 600;
-                }
-                QPushButton:hover {
-                    background-color: #EC407A;
-                }
-            """)
-            self.filter_today_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #888;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 12px;
-                    font-weight: 500;
-                }
-                QPushButton:hover {
-                    background-color: rgba(255, 107, 157, 0.08);
-                    color: #FF6B9D;
-                }
-            """)
-        else:
-            self.filter_today_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #FF6B9D;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 12px;
-                    font-weight: 600;
-                }
-                QPushButton:hover {
-                    background-color: #EC407A;
-                }
-            """)
-            self.filter_all_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #888;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 12px;
-                    font-weight: 500;
-                }
-                QPushButton:hover {
-                    background-color: rgba(255, 107, 157, 0.08);
-                    color: #FF6B9D;
-                }
-            """)
+        active = self.filter_all_btn if filter_type == "all" else self.filter_today_btn
+        self.filter_pill.move_to(active)
+        self._update_filter_buttons()
         self.refresh_tasks()
+
+    def _update_filter_buttons(self):
+        """分段按钮本身保持透明，选中态由下方滑动的高亮块表现"""
+        colors = getattr(self, "_glass_colors", {"muted": "#888888", "accent": "#FF6B9D"})
+        for btn, key in ((self.filter_all_btn, "all"), (self.filter_today_btn, "today")):
+            selected = self.current_filter == key
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {"white" if selected else colors["muted"]};
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: {600 if selected else 500};
+                    padding: 0;
+                }}
+                QPushButton:hover {{
+                    color: {"white" if selected else colors["accent"]};
+                }}
+            """)
 
     def refresh_tasks(self):
         # 确保 task_list_widget 已创建
@@ -6381,11 +6357,14 @@ class MainWindow(QMainWindow):
         container_layout.setContentsMargins(0, 0, 0, 0)
 
         bubble = QFrame(container)
+        bubble.setObjectName("userBubble")
         bubble.setStyleSheet("""
-            QFrame {
-                background-color: #FF8FAB;
-                border-radius: 15px;
+            QFrame#userBubble {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(255, 160, 186, 0.95), stop:1 rgba(255, 120, 160, 0.92));
+                border-radius: 16px;
                 padding: 10px 15px;
+                border: 1px solid rgba(255, 255, 255, 0.6);
             }
         """)
         label = QLabel(message)
@@ -6413,12 +6392,14 @@ class MainWindow(QMainWindow):
         container_layout.addStretch()
 
         bubble = QFrame(container)
+        bubble.setObjectName("aiBubble")
         bubble.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border-radius: 15px;
+            QFrame#aiBubble {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(255, 255, 255, 0.92), stop:1 rgba(255, 255, 255, 0.72));
+                border-radius: 16px;
                 padding: 10px 15px;
-                border: 1px solid #E8E8E8;
+                border: 1px solid rgba(255, 255, 255, 0.95);
             }
         """)
 
@@ -7778,20 +7759,7 @@ class MainWindow(QMainWindow):
             self._voice_timeout_timer.stop()
         if hasattr(self, 'voice_btn'):
             self.voice_btn.setText("🎤")
-            self.voice_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #888;
-                    border: none;
-                    border-radius: 21px;
-                    font-size: 20px;
-                    padding: 0px;
-                }
-                QPushButton:hover {
-                    background-color: #F0F0F0;
-                    color: #FF8FAB;
-                }
-            """)
+            self.voice_btn.setStyleSheet(getattr(self, "_voice_btn_qss", ""))
 
 
 def _exception_hook(exc_type, exc_value, exc_tb):
@@ -7833,5 +7801,6 @@ if __name__ == "__main__":
     app.setStyle("Fusion")
 
     window = MainWindow()
+    fade_in_window(window)
     window.show()
     sys.exit(app.exec_())

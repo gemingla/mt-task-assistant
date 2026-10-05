@@ -5,7 +5,7 @@ from utils import get_data_path
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QSizePolicy)
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QColor
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -59,8 +59,13 @@ class StatisticsWidget(QWidget):
         
         layout.addLayout(header_layout)
         
-        self.figure = Figure(figsize=(8, 6), dpi=100, facecolor='#F8F8F8')
+        # 半透明磨砂底：透出主窗口的玻璃背景，同时保证深色主题下坐标文字可读
+        self.figure = Figure(figsize=(8, 6), dpi=100, facecolor=(1, 1, 1, 0.6))
         self.canvas = FigureCanvas(self.figure)
+        self.canvas.setStyleSheet("background: transparent;")
+        canvas_palette = self.canvas.palette()
+        canvas_palette.setColor(self.canvas.backgroundRole(), QColor(0, 0, 0, 0))
+        self.canvas.setPalette(canvas_palette)
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.canvas.setMinimumHeight(400)
         layout.addWidget(self.canvas)
