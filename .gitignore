@@ -58,3 +58,8 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+
+# 2.0: automatic backups and atomic-write leftovers
+backups/
+*.bak
+crash.log.1

@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime, timedelta
-from utils import get_data_path
+from utils import get_data_path, atomic_write_json, load_json_with_backup
 
 STATS_FILE = get_data_path("stats.json")
 
@@ -13,19 +13,12 @@ class StatsManager:
         self.load_stats()
 
     def load_stats(self):
-        if os.path.exists(self.stats_path):
-            try:
-                with open(self.stats_path, "r", encoding="utf-8") as f:
-                    self.stats = json.load(f)
-            except Exception:
-                self.stats = {}
-        else:
-            self.stats = {}
+        data = load_json_with_backup(self.stats_path, default={})
+        self.stats = data if isinstance(data, dict) else {}
 
     def save_stats(self):
         try:
-            with open(self.stats_path, "w", encoding="utf-8") as f:
-                json.dump(self.stats, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self.stats_path, self.stats)
         except Exception as e:
             print(f"保存统计失败: {e}")
 

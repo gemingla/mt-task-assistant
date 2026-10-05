@@ -3,8 +3,11 @@
 避免代码重复，提供统一的日期解析、任务属性获取和数据路径获取
 """
 
+import json
 import os
+import shutil
 import sys
+import traceback
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
@@ -20,6 +23,61 @@ def get_data_path(relative_path: str = "") -> str:
     if relative_path:
         return os.path.join(base, relative_path)
     return base
+
+
+LOG_MAX_BYTES = 1024 * 1024
+
+
+def log_error(message: str):
+    """把错误信息追加写入数据目录下的 crash.log（不再依赖当前工作目录），超过 1MB 时轮转"""
+    try:
+        path = get_data_path("crash.log")
+        if os.path.exists(path) and os.path.getsize(path) > LOG_MAX_BYTES:
+            os.replace(path, path + ".1")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n===== {datetime.now()} =====\n{message}\n")
+    except Exception:
+        pass
+
+
+def atomic_write_json(path: str, data, indent: int = 2):
+    """
+    原子写入 JSON：先写临时文件并刷盘，再用 os.replace 替换原文件。
+    替换前把旧文件复制为 .bak，写到一半崩溃也不会留下空文件。
+    失败时抛出异常，由调用方决定如何处理。
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=indent)
+        f.flush()
+        os.fsync(f.fileno())
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        try:
+            shutil.copyfile(path, f"{path}.bak")
+        except OSError:
+            pass
+    os.replace(tmp_path, path)
+
+
+def load_json_with_backup(path: str, default=None):
+    """
+    读取 JSON；主文件缺失、为空或损坏时自动回退到 .bak。
+    两者都不可用时返回 default。
+    """
+    for candidate in (path, f"{path}.bak"):
+        if not os.path.exists(candidate) or os.path.getsize(candidate) == 0:
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if candidate != path:
+                log_error(f"[{path}] 主文件不可用，已从备份 {candidate} 恢复")
+            return data
+        except Exception:
+            log_error(f"读取 JSON 失败 [{candidate}]:\n{traceback.format_exc()}")
+    return default
 
 
 def parse_datetime(value) -> Optional[datetime]:

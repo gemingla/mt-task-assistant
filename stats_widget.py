@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime, timedelta
-from utils import get_data_path
+from utils import get_data_path, log_error
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QSizePolicy)
 from PyQt5.QtCore import Qt
@@ -133,14 +133,10 @@ class StatisticsWidget(QWidget):
 
             self.canvas.draw()
         except Exception as e:
-            import traceback, datetime
+            import traceback
             err_msg = f"图表渲染失败: {e}\n{traceback.format_exc()}"
             print(err_msg)
-            try:
-                with open("crash.log", "a", encoding="utf-8") as lf:
-                    lf.write(f"\n===== {datetime.datetime.now()} =====\n{err_msg}\n")
-            except Exception:
-                pass
+            log_error(err_msg)
             self.show_no_data_message()
     
     def show_no_data_message(self):

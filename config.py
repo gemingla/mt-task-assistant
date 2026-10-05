@@ -1,6 +1,7 @@
 import json
 import os
-from utils import get_data_path
+import copy
+from utils import get_data_path, atomic_write_json, load_json_with_backup
 
 
 CONFIG_FILE = get_data_path("config.json")
@@ -29,25 +30,20 @@ class ConfigManager:
         self.config_path = config_path or CONFIG_FILE
 
     def load_config(self):
-        if not os.path.exists(self.config_path):
-            self.save_config(DEFAULT_CONFIG.copy())
-            return DEFAULT_CONFIG.copy()
-
-        try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            for key, value in DEFAULT_CONFIG.items():
-                if key not in config:
-                    config[key] = value
-            return config
-        except Exception as e:
-            print(f"加载配置失败: {e}")
-            self.save_config(DEFAULT_CONFIG.copy())
-            return DEFAULT_CONFIG.copy()
+        # 主文件损坏时回退到 .bak；两者都不可用才使用默认配置，
+        # 且只有文件确实不存在时才写回磁盘，避免把用户的 API Key 等配置清空
+        config = load_json_with_backup(self.config_path)
+        if not isinstance(config, dict):
+            if not os.path.exists(self.config_path):
+                self.save_config(copy.deepcopy(DEFAULT_CONFIG))
+            return copy.deepcopy(DEFAULT_CONFIG)
+        for key, value in DEFAULT_CONFIG.items():
+            if key not in config:
+                config[key] = copy.deepcopy(value)
+        return config
 
     def save_config(self, config):
         try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self.config_path, config)
         except Exception as e:
             print(f"保存配置失败: {e}")

@@ -3,6 +3,7 @@
 管理提醒的增删改查、定时提醒等功能
 """
 import json
+from utils import atomic_write_json, load_json_with_backup
 import os
 import calendar
 from datetime import datetime, timedelta
@@ -115,17 +116,16 @@ class ReminderManager(QObject):
     
     def load_reminders(self):
         """加载提醒数据"""
-        if os.path.exists(self.data_file):
+        data = load_json_with_backup(self.data_file)
+        if data is not None:
             try:
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # 兼容旧格式：直接是列表
-                    if isinstance(data, list):
-                        self.reminders = [Reminder.from_dict(r) for r in data]
-                        self.next_id = max((r["id"] for r in data), default=0) + 1
-                    else:
-                        self.reminders = [Reminder.from_dict(r) for r in data.get("reminders", [])]
-                        self.next_id = data.get("next_id", 1)
+                # 兼容旧格式：直接是列表
+                if isinstance(data, list):
+                    self.reminders = [Reminder.from_dict(r) for r in data]
+                    self.next_id = max((r["id"] for r in data), default=0) + 1
+                else:
+                    self.reminders = [Reminder.from_dict(r) for r in data.get("reminders", [])]
+                    self.next_id = data.get("next_id", 1)
             except Exception as e:
                 print(f"加载提醒数据失败: {e}")
                 self.reminders = []
@@ -138,8 +138,7 @@ class ReminderManager(QObject):
                 "reminders": [r.to_dict() for r in self.reminders],
                 "next_id": self.next_id
             }
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self.data_file, data)
         except Exception as e:
             print(f"保存提醒数据失败: {e}")
     

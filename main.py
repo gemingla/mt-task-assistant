@@ -2,7 +2,7 @@ import sys
 import os
 import json
 import ctypes
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # PyInstaller 资源路径处理
 def resource_path(relative_path):
@@ -91,7 +91,7 @@ from pomodoro_widget import PomodoroWidget
 from pomodoro_dialog import PomodoroDialog
 from stats_chart_widget import BarChartWidget, PieChartWidget
 from stats_widget import StatisticsWidget
-from utils import get_data_path
+from utils import get_data_path, log_error, parse_datetime
 from memory_manager import MemoryManager
 try:
     from voice_input import get_voice_input, get_default_model_path
@@ -110,6 +110,10 @@ from backup_manager import BackupManager
 from calendar_widget import CalendarWidget
 # 成就系统
 from achievement_manager import AchievementManager, AchievementDialog, show_achievement_notification
+
+
+# 已完成任务在主列表中保留显示的天数
+COMPLETED_VISIBLE_DAYS = 3
 
 
 class AsyncAPICall(QThread):
@@ -4435,9 +4439,6 @@ class MainWindow(QMainWindow):
         # 创建桌面快捷方式
         self.create_desktop_shortcut()
 
-        # 启动时自动清理已完成的任务
-        self._auto_clear_completed_tasks()
-        
         self.refresh_tasks()
         self.start_reminder_timer()
         
@@ -4456,6 +4457,25 @@ class MainWindow(QMainWindow):
         self.ethics_analyzer = AIEthicsAnalyzer()
         # 初始化成就系统
         self.achievement_manager = AchievementManager()
+        # 每日自动备份（当天已备份则跳过，只保留最近 7 份）
+        QTimer.singleShot(2000, self._run_auto_backup)
+
+    def _run_auto_backup(self):
+        try:
+            self._make_backup_manager().auto_backup()
+        except Exception:
+            import traceback
+            log_error("自动备份失败:\n" + traceback.format_exc())
+
+    def _make_backup_manager(self):
+        return BackupManager(
+            task_manager=self.task_manager,
+            reminder_manager=self.reminder_manager,
+            stats_manager=self.stats_manager,
+            tag_manager=self.tag_manager,
+            config_manager=self.config_manager,
+            memory_manager=getattr(self, 'memory_manager', None)
+        )
 
     def create_desktop_shortcut(self):
         """创建桌面快捷方式（仅打包后首次运行创建）"""
@@ -5142,6 +5162,12 @@ class MainWindow(QMainWindow):
         smart_sort_action.triggered.connect(self.show_smart_sort_dialog)
         weekly_report_action = tools_menu.addAction("📋 生成周报")
         weekly_report_action.triggered.connect(self.show_weekly_report)
+        tools_menu.addSeparator()
+        show_completed_action = tools_menu.addAction(f"👁 显示全部已完成任务（默认只显示 {COMPLETED_VISIBLE_DAYS} 天内）")
+        show_completed_action.setCheckable(True)
+        show_completed_action.toggled.connect(self.toggle_show_all_completed)
+        clear_completed_action = tools_menu.addAction("🧹 清理已完成任务…")
+        clear_completed_action.triggered.connect(self.clear_completed_tasks_manually)
 
         help_menu = menubar.addMenu("帮助")
         api_wizard_action = help_menu.addAction("API配置向导")
@@ -5300,6 +5326,10 @@ class MainWindow(QMainWindow):
         self.task_list_widget.clear()
 
         tasks = self.task_manager.get_tasks_sorted_by_due()
+
+        # 已完成任务保留在数据中（统计/日历/周报需要），主列表只显示最近完成的
+        if not getattr(self, 'show_all_completed', False):
+            tasks = [t for t in tasks if self._is_recently_completed(t)]
 
         # 应用日期筛选
         if self.current_filter == "today":
@@ -5812,11 +5842,34 @@ class MainWindow(QMainWindow):
             if task.completed:
                 task_list.item(i).setSelected(True)
     
-    def _auto_clear_completed_tasks(self):
-        """启动时自动清理已完成的任务"""
-        completed_count = self.task_manager.clear_completed_tasks()
-        if completed_count > 0:
-            print(f"自动清理了 {completed_count} 个已完成的任务")
+    def clear_completed_tasks_manually(self):
+        """菜单：手动清理已完成任务（会影响统计页/日历/周报中的历史，因此需要确认）"""
+        count = len(self.task_manager.get_tasks(filter_completed=True))
+        if count == 0:
+            QMessageBox.information(self, "提示", "没有已完成的任务")
+            return
+        reply = QMessageBox.question(
+            self, "清理已完成任务",
+            f"将永久删除 {count} 个已完成任务，统计、日历和周报中对应的记录也会消失。\n"
+            "（每日自动备份仍可找回）\n\n确定要清理吗？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.task_manager.clear_completed_tasks()
+            self.refresh_tasks()
+
+    def toggle_show_all_completed(self, checked):
+        """菜单：是否显示所有已完成任务（默认只显示最近完成的）"""
+        self.show_all_completed = bool(checked)
+        self.refresh_tasks()
+
+    def _is_recently_completed(self, task):
+        """已完成任务只在完成后 COMPLETED_VISIBLE_DAYS 天内显示在主列表"""
+        if not task.completed:
+            return True
+        completed_at = parse_datetime(task.completed_at)
+        if completed_at is None:
+            return True
+        return datetime.now() - completed_at <= timedelta(days=COMPLETED_VISIBLE_DAYS)
 
     def open_settings(self):
         dialog = SettingsDialog(self)
@@ -5953,14 +6006,7 @@ class MainWindow(QMainWindow):
 
     def _create_backup(self, parent_dialog):
         """创建备份"""
-        backup_manager = BackupManager(
-            task_manager=self.task_manager,
-            reminder_manager=self.reminder_manager,
-            stats_manager=self.stats_manager,
-            tag_manager=self.tag_manager,
-            config_manager=self.config_manager,
-            memory_manager=self.memory_manager
-        )
+        backup_manager = self._make_backup_manager()
         success, message, path = backup_manager.create_backup()
         if success:
             QMessageBox.information(parent_dialog, "成功", f"{message}\n\n备份位置：{path}")
@@ -6001,14 +6047,7 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.Yes:
-            backup_manager = BackupManager(
-                task_manager=self.task_manager,
-                reminder_manager=self.reminder_manager,
-                stats_manager=self.stats_manager,
-                tag_manager=self.tag_manager,
-                config_manager=self.config_manager,
-                memory_manager=self.memory_manager
-            )
+            backup_manager = self._make_backup_manager()
             success, message = backup_manager.restore_backup(backup_path)
             if success:
                 QMessageBox.information(parent_dialog, "成功", message)
@@ -6032,14 +6071,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
-                backup_manager = BackupManager(
-                    task_manager=self.task_manager,
-                    reminder_manager=self.reminder_manager,
-                    stats_manager=self.stats_manager,
-                    tag_manager=self.tag_manager,
-                    config_manager=self.config_manager,
-                    memory_manager=self.memory_manager
-                )
+                backup_manager = self._make_backup_manager()
                 success, message = backup_manager.restore_backup(file_path)
                 if success:
                     QMessageBox.information(parent_dialog, "成功", message)
@@ -7673,13 +7705,8 @@ def _exception_hook(exc_type, exc_value, exc_tb):
     import traceback
     msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     print(f"[FATAL] 未捕获的异常:\n{msg}", file=sys.stderr)
-    # 写入日志文件以便事后分析
-    log_path = os.path.join(os.getcwd(), "crash.log")
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"\n===== {datetime.now()} =====\n{msg}\n")
-    except Exception:
-        pass
+    # 写入数据目录下的日志文件以便事后分析
+    log_error(msg)
     # 尝试弹出错误对话框（GUI 环境）
     try:
         from PyQt5.QtWidgets import QMessageBox
@@ -7691,15 +7718,12 @@ def _exception_hook(exc_type, exc_value, exc_tb):
 
 if __name__ == "__main__":
     # 记录启动路径信息（调试用）
-    try:
-        with open("crash.log", "a", encoding="utf-8") as lf:
-            lf.write(f"\n===== {datetime.now()} STARTUP =====\n")
-            lf.write(f"frozen={getattr(sys, 'frozen', False)}, exec={sys.executable if getattr(sys, 'frozen', False) else 'N/A'}\n")
-            from utils import get_data_path
-            lf.write(f"tasks.json path: {get_data_path('tasks.json')}\n")
-            lf.write(f"tasks.json exists: {os.path.exists(get_data_path('tasks.json'))}\n")
-    except Exception:
-        pass
+    log_error(
+        f"STARTUP frozen={getattr(sys, 'frozen', False)}, "
+        f"exec={sys.executable if getattr(sys, 'frozen', False) else 'N/A'}\n"
+        f"tasks.json path: {get_data_path('tasks.json')} "
+        f"(exists={os.path.exists(get_data_path('tasks.json'))})"
+    )
 
     sys.excepthook = _exception_hook
     app = QApplication(sys.argv)

@@ -4,6 +4,7 @@
 """
 
 import json
+from utils import atomic_write_json, load_json_with_backup
 import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -101,11 +102,9 @@ class AchievementManager:
 
     def load_data(self):
         """加载数据"""
-        if os.path.exists(self.data_file):
+        data = load_json_with_backup(self.data_file)
+        if data is not None:
             try:
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-
                 # 加载统计
                 self.stats = data.get("stats", self.stats)
                 if self.stats.get("last_active_date"):
@@ -138,8 +137,7 @@ class AchievementManager:
                 "achievements": [a.to_dict() for a in self.achievements.values()],
                 "total_points": self.total_points
             }
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self.data_file, data)
         except Exception as e:
             print(f"保存成就数据失败: {e}")
 

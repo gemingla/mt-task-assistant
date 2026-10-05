@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime
-from utils import get_data_path
+from utils import get_data_path, atomic_write_json, load_json_with_backup, log_error
 
 TASKS_FILE = get_data_path("tasks.json")
 
@@ -70,32 +70,21 @@ class TaskManager:
         self.load_tasks()
 
     def load_tasks(self):
-        if os.path.exists(self.tasks_path):
-            try:
-                with open(self.tasks_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self.tasks = [Task.from_dict(t) for t in data]
-            except Exception as e:
-                print(f"加载任务失败: {e}")
-                self.tasks = []
-        else:
+        data = load_json_with_backup(self.tasks_path, default=[])
+        try:
+            self.tasks = [Task.from_dict(t) for t in data]
+        except Exception as e:
+            print(f"加载任务失败: {e}")
             self.tasks = []
 
     def save_tasks(self):
         try:
-            data = [t.to_dict() for t in self.tasks]
-            with open(self.tasks_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self.tasks_path, [t.to_dict() for t in self.tasks])
         except Exception as e:
             import traceback
             err_msg = f"保存任务失败 [{self.tasks_path}]: {e}\n{traceback.format_exc()}"
             print(err_msg)
-            # 同时写入 crash.log
-            try:
-                with open("crash.log", "a", encoding="utf-8") as lf:
-                    lf.write(f"\n===== {__import__('datetime').datetime.now()} =====\n{err_msg}\n")
-            except Exception:
-                pass
+            log_error(err_msg)
 
     def add_task(self, name, estimated_minutes, source="manual", due_date=None, tags=None):
         task = Task(

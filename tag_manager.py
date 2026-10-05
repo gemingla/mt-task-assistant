@@ -4,7 +4,7 @@
 import json
 import os
 from typing import Dict, List, Tuple
-from utils import get_data_path
+from utils import get_data_path, atomic_write_json, load_json_with_backup
 
 TAGS_FILE = get_data_path("tags.json")
 
@@ -46,21 +46,13 @@ class TagManager:
     
     def load_tags(self):
         """加载用户自定义标签"""
-        if os.path.exists(TAGS_FILE):
-            try:
-                with open(TAGS_FILE, 'r', encoding='utf-8') as f:
-                    self.custom_tags = json.load(f)
-            except Exception as e:
-                print(f"加载标签失败: {e}")
-                self.custom_tags = {}
-        else:
-            self.custom_tags = {}
+        data = load_json_with_backup(TAGS_FILE, default={})
+        self.custom_tags = data if isinstance(data, dict) else {}
     
     def save_tags(self):
         """保存用户自定义标签"""
         try:
-            with open(TAGS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.custom_tags, f, ensure_ascii=False, indent=2)
+            atomic_write_json(TAGS_FILE, self.custom_tags)
         except Exception as e:
             print(f"保存标签失败: {e}")
     

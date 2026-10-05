@@ -8,7 +8,11 @@ import os
 from datetime import datetime
 from typing import Dict, Any, Optional
 import shutil
-from utils import get_data_path
+from utils import get_data_path, atomic_write_json
+
+BACKUP_VERSION = "2.0"
+AUTO_BACKUP_PREFIX = "backup_auto_"
+AUTO_BACKUP_KEEP = 7
 
 
 class BackupManager:
@@ -41,7 +45,7 @@ class BackupManager:
                 backup_path = os.path.join(backup_dir, f"backup_{timestamp}.json")
 
             backup_data = {
-                "version": "1.0",
+                "version": BACKUP_VERSION,
                 "backup_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "data": {}
             }
@@ -70,9 +74,8 @@ class BackupManager:
             if self.memory_manager:
                 backup_data["data"]["memories"] = self._backup_memories()
 
-            # 写入文件
-            with open(backup_path, 'w', encoding='utf-8') as f:
-                json.dump(backup_data, f, ensure_ascii=False, indent=2)
+            # 写入文件（原子写入，避免半截备份）
+            atomic_write_json(backup_path, backup_data)
 
             return True, f"备份成功！", backup_path
 
@@ -80,62 +83,23 @@ class BackupManager:
             return False, f"备份失败: {str(e)}", ""
 
     def _backup_tasks(self) -> list:
-        """备份任务数据"""
+        """备份任务数据（完整保留 id、优先级、完成时间等全部字段）"""
         tasks = []
         for task in self.task_manager.tasks:
-            # 处理 due_date，可能是 datetime 对象或字符串
-            due_date_str = None
-            if task.due_date:
-                if isinstance(task.due_date, str):
-                    due_date_str = task.due_date
-                elif hasattr(task.due_date, 'strftime'):
-                    due_date_str = task.due_date.strftime("%Y-%m-%d %H:%M")
-
-            task_data = {
-                "name": task.name,
-                "completed": task.completed,
-                "estimated_minutes": task.estimated_minutes,
-                "source": getattr(task, 'source', 'manual'),
-                "due_date": due_date_str,
-                "tags": task.tags if hasattr(task, 'tags') else [],
-                "created_at": task.created_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(task, 'created_at') else None
-            }
-            tasks.append(task_data)
+            data = task.to_dict()
+            # 内存中的 due_date 偶尔是 datetime，统一转成字符串
+            if hasattr(data.get("due_date"), "strftime"):
+                data["due_date"] = data["due_date"].strftime("%Y-%m-%d %H:%M")
+            tasks.append(data)
         return tasks
 
     def _backup_reminders(self) -> list:
         """备份提醒数据"""
-        reminders = []
-        for reminder in self.reminder_manager.reminders:
-            # 处理 remind_time，可能是 datetime 对象或字符串
-            remind_time_str = None
-            if reminder.remind_time:
-                if isinstance(reminder.remind_time, str):
-                    remind_time_str = reminder.remind_time
-                elif hasattr(reminder.remind_time, 'strftime'):
-                    remind_time_str = reminder.remind_time.strftime("%Y-%m-%d %H:%M:%S")
-
-            reminder_data = {
-                "title": reminder.title,
-                "remind_time": remind_time_str,
-                "description": reminder.description,
-                "repeat_type": reminder.repeat_type,
-                "enabled": reminder.enabled,
-                "created_at": reminder.created_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(reminder, 'created_at') else None
-            }
-            reminders.append(reminder_data)
-        return reminders
+        return [r.to_dict() for r in self.reminder_manager.reminders]
 
     def _backup_stats(self) -> dict:
-        """备份统计数据"""
-        try:
-            stats_file = self.stats_manager.data_file
-            if os.path.exists(stats_file):
-                with open(stats_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"备份统计数据失败: {e}")
-        return {}
+        """备份统计数据（直接取内存中的统计，避免读文件出错时得到空数据）"""
+        return dict(self.stats_manager.stats)
 
     def _backup_tags(self) -> dict:
         """备份标签数据"""
@@ -180,6 +144,10 @@ class BackupManager:
             data = backup_data.get("data", {})
             restored_items = []
 
+            # 覆盖之前先把当前数据存一份，误操作时可以找回
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.create_backup(os.path.join(self._backup_dir(), f"backup_before_restore_{timestamp}.json"))
+
             # 恢复任务
             if "tasks" in data and self.task_manager:
                 count = self._restore_tasks(data["tasks"])
@@ -217,76 +185,68 @@ class BackupManager:
             return False, f"恢复失败: {str(e)}"
 
     def _restore_tasks(self, tasks_data: list) -> int:
-        """恢复任务"""
-        from datetime import datetime
-        count = 0
-        # 清空现有任务
-        self.task_manager.tasks = []
-
+        """恢复任务；兼容 1.0 版备份（无 id、日期字段格式不同）"""
+        from task_manager import Task
+        restored = []
+        next_id = 1
         for task_data in tasks_data:
-            due_date = None
-            if task_data.get("due_date"):
-                try:
-                    due_date = datetime.strptime(task_data["due_date"], "%Y-%m-%d %H:%M")
-                except ValueError as e:
-                    print(f"解析任务日期失败: {e}")
+            data = dict(task_data)
+            if not data.get("id"):
+                data["id"] = next_id
+            next_id = max(next_id, data["id"]) + 1
+            if data.get("completed") and not data.get("completed_at"):
+                data["completed_at"] = (data.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            restored.append(Task.from_dict(data))
 
-            task = self.task_manager.add_task(
-                name=task_data["name"],
-                estimated_minutes=task_data.get("estimated_minutes", 30),
-                source=task_data.get("source", "manual"),
-                due_date=due_date,
-                tags=task_data.get("tags", [])
-            )
+        # 保证 id 唯一
+        seen = set()
+        for task in restored:
+            if task.id in seen:
+                task.id = next_id
+                next_id += 1
+            seen.add(task.id)
 
-            if task_data.get("completed"):
-                task.completed = True
-
-            count += 1
-
+        self.task_manager.tasks = restored
         self.task_manager.save_tasks()
-        return count
+        return len(restored)
 
     def _restore_reminders(self, reminders_data: list) -> int:
-        """恢复提醒"""
-        from datetime import datetime
-        count = 0
-        # 清空现有提醒
-        self.reminder_manager.reminders = []
-        self.reminder_manager.next_id = 1
-
+        """恢复提醒；兼容 1.0 版备份（无 id）"""
+        from reminder_manager import Reminder
+        restored = []
+        next_id = 1
         for reminder_data in reminders_data:
             try:
-                remind_time = datetime.strptime(reminder_data["remind_time"], "%Y-%m-%d %H:%M:%S")
-                self.reminder_manager.add_reminder(
-                    title=reminder_data["title"],
-                    remind_time=remind_time,
-                    description=reminder_data.get("description", ""),
-                    repeat_type=reminder_data.get("repeat_type", "none")
-                )
-                count += 1
+                data = dict(reminder_data)
+                data["id"] = data.get("id") or next_id
+                data["created_at"] = data.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                restored.append(Reminder.from_dict(data))
+                next_id = max(next_id, data["id"]) + 1
             except Exception as e:
                 print(f"恢复提醒失败: {e}")
 
-        # 确保持久化
+        self.reminder_manager.reminders = restored
+        self.reminder_manager.next_id = next_id
         self.reminder_manager.save_reminders()
-        return count
+        return len(restored)
 
     def _restore_stats(self, stats_data: dict):
-        """恢复统计数据"""
-        try:
-            stats_file = self.stats_manager.data_file
-            with open(stats_file, 'w', encoding='utf-8') as f:
-                json.dump(stats_data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"恢复统计数据失败: {e}")
+        """恢复统计数据（同时更新内存，避免之后被旧数据覆盖）"""
+        if not isinstance(stats_data, dict):
+            return
+        self.stats_manager.stats = dict(stats_data)
+        self.stats_manager.save_stats()
 
     def _restore_tags(self, tags_data: dict):
-        """恢复标签"""
+        """恢复标签（保留自定义颜色）"""
         try:
-            # 恢复自定义标签
-            for tag in tags_data.get("custom_tags", []):
-                self.tag_manager.add_custom_tag(tag)
+            custom = tags_data.get("custom_tags", {})
+            if isinstance(custom, dict):
+                for tag, color in custom.items():
+                    self.tag_manager.add_custom_tag(tag, color)
+            else:  # 兼容列表格式
+                for tag in custom:
+                    self.tag_manager.add_custom_tag(tag)
         except Exception as e:
             print(f"恢复标签失败: {e}")
 
@@ -331,6 +291,37 @@ class BackupManager:
             self.memory_manager._save_memories()
         except Exception as e:
             print(f"恢复记忆失败: {e}")
+
+    @staticmethod
+    def _backup_dir() -> str:
+        backup_dir = get_data_path("backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        return backup_dir
+
+    def auto_backup(self, keep: int = AUTO_BACKUP_KEEP) -> Optional[str]:
+        """
+        每日自动备份：当天还没有自动备份时创建一份，并只保留最近 keep 份自动备份。
+        手动备份不受影响。返回新备份路径；当天已备份或失败时返回 None。
+        """
+        backup_dir = self._backup_dir()
+        today = datetime.now().strftime("%Y%m%d")
+        autos = sorted(f for f in os.listdir(backup_dir)
+                       if f.startswith(AUTO_BACKUP_PREFIX) and f.endswith(".json"))
+        if any(f.startswith(f"{AUTO_BACKUP_PREFIX}{today}") for f in autos):
+            return None
+
+        path = os.path.join(backup_dir, f"{AUTO_BACKUP_PREFIX}{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        success, _, path = self.create_backup(path)
+        if not success:
+            return None
+
+        autos.append(os.path.basename(path))
+        for old_file in sorted(autos)[:-keep]:
+            try:
+                os.remove(os.path.join(backup_dir, old_file))
+            except OSError:
+                pass
+        return path
 
     def get_backup_list(self) -> list:
         """获取备份文件列表"""

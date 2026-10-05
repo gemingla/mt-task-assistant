@@ -4,6 +4,7 @@ AI记忆管理模块
 """
 
 import json
+from utils import atomic_write_json, load_json_with_backup
 import os
 import hashlib
 from datetime import datetime, timedelta
@@ -127,13 +128,11 @@ class MemoryManager:
     def _load_memories(self):
         """从文件加载记忆"""
         memory_file = self._get_memory_file()
-        if not os.path.exists(memory_file):
+        data = load_json_with_backup(memory_file)
+        if data is None:
             return
-        
+
         try:
-            with open(memory_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
             # 加载短期记忆
             for mem_data in data.get("short_term", []):
                 memory = Memory.from_dict(mem_data)
@@ -162,9 +161,8 @@ class MemoryManager:
                 "last_updated": datetime.now().isoformat()
             }
             
-            with open(memory_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                
+            atomic_write_json(memory_file, data)
+
         except Exception as e:
             print(f"保存记忆失败: {e}")
     
